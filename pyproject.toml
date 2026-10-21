@@ -79,7 +79,8 @@ mypy_path = [
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests", "packages", "plugins", "apps"]
-addopts = ["-ra", "--import-mode=importlib", "--strict-markers"]
+# Slow tests (separate venvs, real Blender builds) run with: uv run pytest -m slow
+addopts = ["-ra", "--import-mode=importlib", "--strict-markers", "-m", "not slow"]
 markers = [
     "blender: needs a local Blender (path from atelier.toml); skipped otherwise",
     "slow: spawns subprocesses or builds separate environments",
