@@ -1,0 +1,25 @@
+# Local Atelier configuration. Copy to atelier.toml (git-ignored) and adjust.
+# Secrets do not belong here: they go to .env.
+
+[paths]
+# Folder with show projects; relative paths are resolved against this file.
+projects_dir = "projects"
+# Headless Blender used for the final build and export.
+blender_exe = 'C:\Program Files\Blender Foundation\Blender 5.2\blender.exe'
+
+[blender]
+# Module name of the installed Skybrush Studio add-on.
+skybrush_addon = "ui_skybrush_studio"
+# Kill a Blender job after this many seconds.
+timeout_s = 1800
+
+# Custom fleet presets, on top of the built-in "conservative" and "skybrush_default".
+# [fleet_presets.my_fleet]
+# min_distance_m = 2.0
+# max_speed_h_ms = 6.0
+# max_speed_up_ms = 3.0
+# max_speed_down_ms = 2.0
+# max_accel_ms2 = 3.0
+# altitude_min_m = 2.5
+# altitude_max_m = 120.0
+# takeoff_grid_spacing_m = 3.0
