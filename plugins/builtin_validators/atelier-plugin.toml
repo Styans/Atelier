@@ -1,0 +1,9 @@
+id = "builtin_validators"
+name = "Built-in safety validators"
+version = "0.1.0"
+api_version = "1"
+namespace = "builtin"
+roles = ["validator_rule"]
+runtime = "inprocess"
+entry = "atelier_builtin_validators:plugin"
+requires_gpu = false

@@ -1,0 +1,9 @@
+id = "builtin_transitions"
+name = "Built-in transition planners"
+version = "0.1.0"
+api_version = "1"
+namespace = "builtin"
+roles = ["transition_planner"]
+runtime = "inprocess"
+entry = "atelier_builtin_transitions:plugin"
+requires_gpu = false

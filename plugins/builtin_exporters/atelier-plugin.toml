@@ -1,0 +1,9 @@
+id = "builtin_exporters"
+name = "Built-in exporters"
+version = "0.1.0"
+api_version = "1"
+namespace = "builtin"
+roles = ["exporter"]
+runtime = "inprocess"
+entry = "atelier_builtin_exporters:plugin"
+requires_gpu = false

@@ -10,6 +10,12 @@ dependencies = [
     "atelier-show-engine",
     "atelier-blender-bridge",
     "atelier-cli",
+    # Plugins are discovered from plugins/ at runtime; listing them here only installs
+    # their dependencies into the platform environment.
+    "atelier-builtin-animation",
+    "atelier-builtin-transitions",
+    "atelier-builtin-validators",
+    "atelier-builtin-exporters",
 ]
 
 [dependency-groups]
@@ -35,6 +41,10 @@ atelier-plugin-host = { workspace = true }
 atelier-show-engine = { workspace = true }
 atelier-blender-bridge = { workspace = true }
 atelier-cli = { workspace = true }
+atelier-builtin-animation = { workspace = true }
+atelier-builtin-transitions = { workspace = true }
+atelier-builtin-validators = { workspace = true }
+atelier-builtin-exporters = { workspace = true }
 
 # --- ruff -------------------------------------------------------------------
 
@@ -61,7 +71,7 @@ known-first-party = ["atelier_*"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["packages/*/src", "apps/*/src", "tests"]
+files = ["packages/*/src", "apps/*/src", "plugins/*/src", "tests"]
 exclude = ['packages/blender_bridge/src/atelier_blender_bridge/scripts/']
 explicit_package_bases = true
 plugins = ["pydantic.mypy"]
@@ -73,6 +83,11 @@ mypy_path = [
     "packages/blender_bridge/src",
     "apps/cli/src",
 ]
+
+[[tool.mypy.overrides]]
+# Libraries without type information.
+module = ["scipy.*", "trimesh.*", "soundfile.*"]
+ignore_missing_imports = true
 
 # --- pytest -----------------------------------------------------------------
 

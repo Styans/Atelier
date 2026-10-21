@@ -1,0 +1,16 @@
+[project]
+name = "atelier-builtin-validators"
+version = "0.1.0"
+description = "Built-in safety validators for Atelier"
+requires-python = ">=3.12"
+dependencies = [
+    "atelier-domain",
+    "atelier-plugin-sdk",
+    "numpy>=2.1",
+    "pydantic>=2.9",
+    "scipy>=1.14",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.4,<0.14"]
+build-backend = "uv_build"
