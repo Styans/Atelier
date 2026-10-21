@@ -46,6 +46,9 @@ extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "PTH", "RUF"]
+# N818: error names are part of the plugin contract (InvalidParams, Cancelled, ...).
+# UP046/UP047: TypeVar generics read better than PEP 695 for the role base classes.
+ignore = ["N818", "UP046", "UP047"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["atelier_*"]
@@ -61,6 +64,7 @@ strict = true
 files = ["packages/*/src", "apps/*/src", "tests"]
 exclude = ['packages/blender_bridge/src/atelier_blender_bridge/scripts/']
 explicit_package_bases = true
+plugins = ["pydantic.mypy"]
 mypy_path = [
     "packages/domain/src",
     "packages/plugin_sdk/src",
