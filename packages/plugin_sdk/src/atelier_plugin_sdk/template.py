@@ -64,9 +64,11 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from atelier_plugin_sdk import (
+    ContourRef,
     Health,
     MeshRef,
     Plugin,
+    PluginError,
     PointDistributor,
     PointSet,
     PointSetRef,
@@ -86,8 +88,10 @@ class RandomDistributor(PointDistributor[RandomParams]):
     Params = RandomParams
 
     def distribute(
-        self, ctx: RunContext, source: MeshRef, n: int, params: RandomParams
+        self, ctx: RunContext, source: MeshRef | ContourRef, n: int, params: RandomParams
     ) -> PointSetRef:
+        if not isinstance(source, MeshRef):
+            raise PluginError("only surfaces are supported")
         mesh = source.load()
         tris = mesh.triangles()
         area = mesh.face_areas()

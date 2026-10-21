@@ -1,0 +1,20 @@
+[project]
+name = "atelier-pointille"
+version = "0.1.0"
+description = "Atelier point_distributor plugin wrapping the Pointille core"
+requires-python = ">=3.12"
+dependencies = [
+    "atelier-plugin-sdk",
+    "numpy>=2.1",
+    "pointille",
+    "pydantic>=2.9",
+    "scipy>=1.14",
+]
+
+[tool.uv.sources]
+# Pinned through uv.lock to a commit of the atelier-integration branch (ADR-013).
+pointille = { git = "file:///C:/Users/Beacon/Repo/Pointille", branch = "atelier-integration" }
+
+[build-system]
+requires = ["uv_build>=0.13.4,<0.14"]
+build-backend = "uv_build"

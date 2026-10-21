@@ -16,6 +16,7 @@ dependencies = [
     "atelier-builtin-transitions",
     "atelier-builtin-validators",
     "atelier-builtin-exporters",
+    "atelier-pointille",
 ]
 
 [dependency-groups]
@@ -45,6 +46,7 @@ atelier-builtin-animation = { workspace = true }
 atelier-builtin-transitions = { workspace = true }
 atelier-builtin-validators = { workspace = true }
 atelier-builtin-exporters = { workspace = true }
+atelier-pointille = { workspace = true }
 
 # --- ruff -------------------------------------------------------------------
 
@@ -86,7 +88,7 @@ mypy_path = [
 
 [[tool.mypy.overrides]]
 # Libraries without type information.
-module = ["scipy.*", "trimesh.*", "soundfile.*"]
+module = ["scipy.*", "trimesh.*", "soundfile.*", "pointille.*"]
 ignore_missing_imports = true
 
 # --- pytest -----------------------------------------------------------------

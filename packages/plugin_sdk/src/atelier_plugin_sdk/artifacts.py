@@ -206,6 +206,16 @@ class PointSet:
     def __len__(self) -> int:
         return len(self.positions)
 
+    def evaluate(self, faces: npt.ArrayLike, vertices: npt.ArrayLike) -> FloatArray:
+        """Positions on a deformed copy of the source mesh (same faces, moved vertices).
+
+        Drones keep their triangle and barycentric coordinates, so they follow the surface
+        without being redistributed or swapping places.
+        """
+        corners = np.asarray(vertices, dtype=np.float64)[np.asarray(faces)[self.tri_index]]
+        result: FloatArray = np.einsum("nk,nkd->nd", self.barycentric, corners)
+        return result
+
     def _arrays(self) -> dict[str, np.ndarray[Any, Any]]:
         return {
             "positions": self.positions,

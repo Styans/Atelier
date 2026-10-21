@@ -1,0 +1,9 @@
+id = "pointille"
+name = "Pointille"
+version = "0.1.0"
+api_version = "1"
+roles = ["point_distributor"]
+runtime = "inprocess"
+entry = "atelier_pointille:plugin"
+requires_gpu = false
+description = "Even drone placement over any 3D surface (wraps the Pointille core)"
