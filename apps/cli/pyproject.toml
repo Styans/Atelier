@@ -1,0 +1,20 @@
+[project]
+name = "atelier-cli"
+version = "0.1.0"
+description = "Atelier command line: every platform action without the UI"
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.15",
+    "atelier-domain",
+    "atelier-plugin-sdk",
+    "atelier-plugin-host",
+    "atelier-show-engine",
+    "atelier-blender-bridge",
+]
+
+[project.scripts]
+atelier = "atelier_cli.main:app"
+
+[build-system]
+requires = ["uv_build>=0.13.4,<0.14"]
+build-backend = "uv_build"

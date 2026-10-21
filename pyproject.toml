@@ -1,0 +1,82 @@
+[project]
+name = "atelier-workspace"
+version = "0.1.0"
+description = "Atelier: local drone-show production platform, from idea to fleet files"
+requires-python = ">=3.12"
+dependencies = [
+    "atelier-domain",
+    "atelier-plugin-sdk",
+    "atelier-plugin-host",
+    "atelier-show-engine",
+    "atelier-blender-bridge",
+    "atelier-cli",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.uv]
+# The root only ties the workspace together; it is never built or installed.
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*", "plugins/*", "apps/cli"]
+# Pygmalion runs as a subprocess plugin in its own venv (torch/CUDA), see docs/DECISIONS.md.
+exclude = ["plugins/pygmalion"]
+
+[tool.uv.sources]
+atelier-domain = { workspace = true }
+atelier-plugin-sdk = { workspace = true }
+atelier-plugin-host = { workspace = true }
+atelier-show-engine = { workspace = true }
+atelier-blender-bridge = { workspace = true }
+atelier-cli = { workspace = true }
+
+# --- ruff -------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# Code blocks in docs (including the spec) are sketches, not sources.
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "PTH", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["atelier_*"]
+
+# --- mypy -------------------------------------------------------------------
+# Strict for all core packages (the spec requires it at least for domain and
+# show_engine). Blender scripts run inside Blender's own Python with bpy and are
+# not type-checked here.
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["packages/*/src", "apps/*/src", "tests"]
+exclude = ['packages/blender_bridge/src/atelier_blender_bridge/scripts/']
+explicit_package_bases = true
+mypy_path = [
+    "packages/domain/src",
+    "packages/plugin_sdk/src",
+    "packages/plugin_host/src",
+    "packages/show_engine/src",
+    "packages/blender_bridge/src",
+    "apps/cli/src",
+]
+
+# --- pytest -----------------------------------------------------------------
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests", "packages", "plugins", "apps"]
+addopts = ["-ra", "--import-mode=importlib", "--strict-markers"]
+markers = [
+    "blender: needs a local Blender (path from atelier.toml); skipped otherwise",
+    "slow: spawns subprocesses or builds separate environments",
+]
