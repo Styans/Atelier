@@ -152,8 +152,11 @@ settings = {}                     # ключи настроек с описан�
 ### Subprocess: JSON-RPC 2.0 по stdio
 - NDJSON (одна UTF-8 строка на сообщение, ≤ 16 MB), большие данные — файлами (`$ndarray` → `.npy`,
   `$ref` → путь артефакта, `$type` → модели).
-- `python -m atelier_plugin_sdk.serve --entry pkg:plugin --path src`: дубликат настоящего stdout — под
-  протокол, fd 1 → stderr (посторонние принты не ломают канал), stderr → лог плагина.
+- `python -m atelier_plugin_sdk.serve --entry pkg:plugin --path src`: дубликаты настоящих stdin и
+  stdout — под протокол; коду плагина fd 0 → NUL, fd 1 → stderr (посторонние принты не ломают канал),
+  stderr → лог плагина. NUL на stdin обязателен под Windows: синхронный pipe пропускает одну операцию,
+  и нативная библиотека (BLAS у scipy), спрашивающая stdin при загрузке в потоке вызова, ждала бы
+  чтения протокола — взаимная блокировка.
 - Хост → плагин: `atelier.initialize`, `atelier.health`, `atelier.normalize_params`, `atelier.invoke`,
   `atelier.cancel`, `atelier.shutdown`. Плагин → хост: `atelier.progress`, `atelier.log`.
 - Ошибки: `-32602` InvalidParams, `1001` PluginError, `1002` ResourceExhausted (`data.hint`),
