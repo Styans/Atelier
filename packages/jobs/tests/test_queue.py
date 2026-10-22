@@ -24,6 +24,16 @@ def test_jobs_are_claimed_oldest_first_and_once(queue: JobQueue) -> None:
     assert claimed[0] is not None and claimed[0].status == "running" and claimed[0].worker_pid == 1
 
 
+def test_order_holds_when_jobs_share_a_timestamp(
+    queue: JobQueue, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(time, "time", lambda: 1_000.0)
+    ids = [queue.submit("s", "compile").id for _ in range(20)]
+
+    assert [queue.claim(pid=1).id for _ in ids] == ids  # type: ignore[union-attr]
+    assert [j.id for j in queue.jobs(limit=20)] == ids[::-1]
+
+
 def test_gpu_kinds_are_flagged(queue: JobQueue) -> None:
     assert queue.submit("s", "generate_images", {"prompt": "x"}).gpu
     assert not queue.submit("s", "compile").gpu

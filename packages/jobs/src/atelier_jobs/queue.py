@@ -16,9 +16,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import event, text
+from sqlalchemy import event, literal_column, text
 from sqlalchemy.engine import Engine
-from sqlmodel import Field, Session, SQLModel, col, create_engine, select
+from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 from atelier_domain import Show
 from atelier_show_engine.store import COMMIT_LISTENERS, RevisionInfo, ShowStore
@@ -120,14 +120,18 @@ class JobQueue:
         return job
 
     def claim(self, pid: int) -> Job | None:
-        """Take the oldest queued job; atomic, so two workers never get the same one."""
+        """Take the oldest queued job; atomic, so two workers never get the same one.
+
+        Order is SQLite's rowid (insertion order): jobs submitted back to back can share a
+        ``created_at``, and the ids are random.
+        """
         now = time.time()
         with self.engine.begin() as conn:
             row = conn.execute(
                 text(
                     "UPDATE jobs SET status='running', worker_pid=:pid, started_at=:now, "
                     "updated_at=:now, message='' WHERE id = (SELECT id FROM jobs "
-                    "WHERE status='queued' ORDER BY created_at, id LIMIT 1) AND status='queued' "
+                    "WHERE status='queued' ORDER BY rowid LIMIT 1) AND status='queued' "
                     "RETURNING id"
                 ),
                 {"pid": pid, "now": now},
@@ -140,7 +144,7 @@ class JobQueue:
 
     def jobs(self, show_id: str | None = None, limit: int = 50) -> list[Job]:
         with self.session() as session:
-            query = select(Job).order_by(col(Job.created_at).desc()).limit(limit)
+            query = select(Job).order_by(literal_column("rowid").desc()).limit(limit)
             if show_id:
                 query = query.where(Job.show_id == show_id)
             return list(session.exec(query))
