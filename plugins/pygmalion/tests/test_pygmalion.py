@@ -7,6 +7,7 @@ Skipped when Pygmalion's runtime is not found. Paths come from ATELIER_PYGMALION
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -37,9 +38,14 @@ def settings() -> dict[str, dict[str, str]]:
 
 
 @pytest.fixture(scope="module")
-def registry() -> Iterator[PluginRegistry]:
+def logs(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return tmp_path_factory.mktemp("logs")
+
+
+@pytest.fixture(scope="module")
+def registry(logs: Path) -> Iterator[PluginRegistry]:
     with PluginRegistry.discover(
-        [PLUGINS], use_entry_points=False, plugin_settings=settings()
+        [PLUGINS], use_entry_points=False, plugin_settings=settings(), log_dir=logs
     ) as reg:
         yield reg
 
@@ -76,6 +82,22 @@ def test_mock_images_and_mesh(registry: PluginRegistry, tmp_path: Path) -> None:
         workdir=tmp_path / "b",
     )
     assert isinstance(result, MeshRef) and result.path.read_bytes()[:4] == b"glTF"
+
+
+def test_pygmalion_logs_reach_the_plugin_log(registry: PluginRegistry, logs: Path) -> None:
+    # A silent log hid where a real GPU run was stuck: Pygmalion's own logging must land there.
+    images = registry.resolve("image_generator", "pygmalion.images")
+    images.invoke(
+        {"prompt": "a gold star", "negative": None, "n": 1},
+        {"backend": "mock", "width": 256, "height": 256},
+        seed=3,
+        workdir=logs / "run",
+    )
+    log = logs / "pygmalion.log"
+    deadline = time.monotonic() + 5
+    while "dronegen.jobs" not in log.read_text(encoding="utf-8") and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert "dronegen.jobs" in log.read_text(encoding="utf-8")
 
 
 def test_pygmalion_errors_are_readable(registry: PluginRegistry, tmp_path: Path) -> None:

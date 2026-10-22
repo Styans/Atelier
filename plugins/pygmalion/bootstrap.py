@@ -6,9 +6,16 @@ Nothing is installed into Pygmalion's venv: the host passes where the Atelier SD
 """
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
+
+# Pygmalion reports model loading and job stages through logging; stderr ends up in the
+# plugin log (.atelier/logs/pygmalion.log), stdout stays reserved for the protocol.
+logging.basicConfig(
+    level=logging.INFO, stream=sys.stderr, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
 
 HERE = Path(__file__).resolve().parent
 settings = json.loads(os.environ.get("ATELIER_PLUGIN_SETTINGS", "{}"))
