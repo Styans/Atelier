@@ -213,6 +213,28 @@ def test_cache_lists_subprocess_plugins_without_starting_them(
         assert runner.started
 
 
+def test_native_import_in_a_call_does_not_wait_for_stdin(tmp_path: Path, mesh_ref: MeshRef) -> None:
+    # Started from the cache, the plugin's first scipy import happens in the call thread. scipy's
+    # BLAS DLL queries the standard input while loading; on Windows that waited for the server's
+    # pending read of the protocol pipe: a deadlock that hung real Pygmalion runs.
+    plugin_id = uid()
+    source = RANDOM_SOURCE.replace(
+        "time.sleep(params.sleep_s)", "time.sleep(params.sleep_s)\n        import scipy.linalg"
+    )
+    write_plugin(tmp_path / "plugins", plugin_id, source=source, runtime="subprocess")
+    cache = tmp_path / "cache.json"
+    discover(tmp_path / "plugins", cache_path=cache).close()
+
+    with discover(tmp_path / "plugins", cache_path=cache) as registry:
+        handle = registry.resolve("point_distributor", plugin_id)
+        runner = handle.runner
+        assert isinstance(runner, SubprocessRunner)
+        runner.call_timeout_s = 60.0
+        result = handle.invoke({"source": mesh_ref, "n": 4}, {}, seed=1, workdir=tmp_path / "w")
+
+    assert len(result.load()) == 4
+
+
 def test_union_schema_embeds_each_component(tmp_path: Path) -> None:
     plugin_id = uid()
     create_plugin(tmp_path, plugin_id, "animation_primitive", namespace=plugin_id)

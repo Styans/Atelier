@@ -7,13 +7,12 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import io
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from atelier_plugin_sdk.plugin import Plugin
-from atelier_plugin_sdk.rpc.server import PluginServer, protect_stdout
+from atelier_plugin_sdk.rpc.server import PluginServer, protect_stdio
 
 
 def load_entry(entry: str) -> Plugin:
@@ -29,12 +28,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--entry", required=True, help="module:attribute of the Plugin object")
     parser.add_argument("--path", action="append", default=[], help="extra import path")
     args = parser.parse_args(argv)
-    out = protect_stdout()
+    requests, out = protect_stdio()
     for path in reversed(args.path):
         sys.path.insert(0, str(Path(path).resolve()))
     plugin = load_entry(args.entry)
-    stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", newline="\n")
-    PluginServer(plugin, out).serve(stdin)
+    PluginServer(plugin, out).serve(requests)
     return 0
 
 

@@ -24,12 +24,26 @@ from atelier_plugin_sdk.roles import ROLE_NAMES, RoleName
 from atelier_plugin_sdk.rpc.codec import decode, dumps, encode, error_payload
 
 
-def protect_stdout() -> IO[str]:
-    """Keep the real stdout for the protocol and send everything else printed to stderr."""
-    protocol_fd = os.dup(1)
+def protect_stdio() -> tuple[IO[str], IO[str]]:
+    """Take stdin and stdout for the protocol; plugin code gets NUL as stdin, stderr as stdout.
+
+    Stdout: stray prints must not break the channel. Stdin: on Windows a synchronous pipe lets one
+    operation at a time through, so while the server waits for the next request, anything that
+    touches the standard input from a call thread waits too. scipy's BLAS DLL does that while
+    loading, and the host sends nothing until the call answers: a deadlock.
+    """
+    protocol_in = os.dup(0)
+    null = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(null, 0)  # also the process' standard input handle, which native code asks for
+    os.close(null)
+    sys.stdin = Path(os.devnull).open(encoding="utf-8")  # noqa: SIM115 - lives with the process
+    protocol_out = os.dup(1)
     os.dup2(2, 1)
     sys.stdout = sys.stderr
-    return os.fdopen(protocol_fd, "w", encoding="utf-8", newline="\n", buffering=1)
+    return (
+        os.fdopen(protocol_in, "r", encoding="utf-8", newline="\n"),
+        os.fdopen(protocol_out, "w", encoding="utf-8", newline="\n", buffering=1),
+    )
 
 
 class PluginServer:
