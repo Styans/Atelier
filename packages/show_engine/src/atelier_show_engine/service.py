@@ -14,12 +14,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import numpy.typing as npt
+from pydantic import ValidationError
+from scipy.spatial import cKDTree
+
 from atelier_domain import (
     AnimationSpec,
     AnimTrack,
     ArtifactRecord,
     AudioTrack,
     Brief,
+    FlightSettings,
     ModelCard,
     Scene,
     Show,
@@ -39,10 +45,13 @@ from atelier_plugin_sdk import (
     PointSet,
     RuleResult,
     Violation,
+    linear_to_srgb8,
 )
-from atelier_plugin_sdk.roles import RoleName
-from atelier_show_engine.compiler import CompileError, Compiler, CompileReport
+from atelier_plugin_sdk.roles import ROLE_NAMES, RoleName
+from atelier_show_engine.compiler import CompileError, Compiler, CompileReport, figure_colors
 from atelier_show_engine.config import AtelierConfig
+from atelier_show_engine.diffing import DiffEntry, diff_shows
+from atelier_show_engine.geometry import place
 from atelier_show_engine.importing import UpAxis, copy_asset, load_mesh_file, probe_audio
 from atelier_show_engine.provenance import (
     IMPORT_MESH,
@@ -55,14 +64,76 @@ from atelier_show_engine.provenance import (
     points_slot,
     producer_for,
 )
-from atelier_show_engine.store import ShowStore, StoreError
+from atelier_show_engine.store import ConflictError, ShowStore, StoreError
 
 Progress = Callable[[float, str], None]
 SINGLE_STAGE_ROLES: tuple[RoleName, ...] = ("point_distributor", "transition_planner")
 
 
+BRIEF_FIELDS = frozenset(
+    {
+        "title",
+        "occasion",
+        "date",
+        "location",
+        "viewer_direction",
+        "duration_s",
+        "mood",
+        "palette",
+        "must_have",
+        "forbidden",
+        "notes",
+        "status",
+    }
+)
+MODEL_FIELDS = frozenset(
+    {
+        "name",
+        "kind",
+        "description",
+        "style",
+        "image_prompt",
+        "negative_prompt",
+        "palette",
+        "target_height_m",
+        "facing",
+        "drone_count",
+        "color_source",
+        "status",
+        "pipeline_overrides",
+    }
+)
+SCENE_FIELDS = frozenset(
+    {"title", "model_id", "hold_s", "transition_in", "animation", "offset_m", "rotation_deg"}
+)
+
+
 class ServiceError(Exception):
     pass
+
+
+def _validation_message(exc: ValidationError) -> str:
+    return "; ".join(
+        f"{'.'.join(str(p) for p in e['loc']) or 'value'}: {e['msg']}" for e in exc.errors()
+    )
+
+
+def _scene_index(show: Show, scene_id: str) -> int:
+    for index, scene in enumerate(show.program):
+        if scene.id == scene_id:
+            return index
+    raise ServiceError(f"no scene {scene_id!r}")
+
+
+@dataclass
+class PointsPreview:
+    positions: npt.NDArray[np.float32]  # placed in the show, metres
+    colors: npt.NDArray[np.uint8]  # sRGB LED colours
+    nearest_m: npt.NDArray[np.float32]  # distance to the nearest drone
+    scale: float
+    min_distance_m: float
+    stale: str | None
+    metrics: dict[str, float]
 
 
 @dataclass
@@ -91,9 +162,15 @@ def _dir_hash(folder: Path) -> str:
 
 
 class ShowService:
-    def __init__(self, config: AtelierConfig, registry: PluginRegistry | None = None) -> None:
+    def __init__(
+        self, config: AtelierConfig, registry: PluginRegistry | None = None, author: str = "cli"
+    ) -> None:
         self.config = config
         self._registry = registry
+        self.author = author  # recorded in the revision history: cli, ui, worker, assistant
+
+    def _commit(self, store: ShowStore, show: Show, message: str) -> Show:
+        return store.commit(show, message, self.author)
 
     @property
     def registry(self) -> PluginRegistry:
@@ -101,9 +178,10 @@ class ShowService:
             self._registry = PluginRegistry.discover(
                 self.config.plugin_dirs,
                 config=self.config.host_config(),
-                disabled=self.config.plugins.disabled,
+                disabled=self.config.disabled_plugins,
                 cache_path=self.config.cache_dir / "plugins.json",
                 log_dir=self.config.cache_dir / "logs",
+                plugin_settings=self.config.plugin_settings,
             )
         return self._registry
 
@@ -175,15 +253,17 @@ class ShowService:
             )
         except KeyError as exc:
             raise ServiceError(str(exc.args[0])) from exc
-        return store.commit(show, f"Fleet preset {name}")
+        return self._commit(store, show, f"Fleet preset {name}")
 
     def set_fleet(self, store: ShowStore, **values: Any) -> Show:
         show = store.load()
         data = show.brief.fleet.model_dump() | {k: v for k, v in values.items() if v is not None}
         data["preset"] = None if values.keys() - {"drone_count"} else data["preset"]
         show.brief.fleet = type(show.brief.fleet).model_validate(data)
-        return store.commit(
-            show, "Fleet: " + ", ".join(f"{k}={v}" for k, v in values.items() if v is not None)
+        return self._commit(
+            store,
+            show,
+            "Fleet: " + ", ".join(f"{k}={v}" for k, v in values.items() if v is not None),
         )
 
     def set_music(self, store: ShowStore, path: Path, offset_s: float | None = None) -> Show:
@@ -195,7 +275,7 @@ class ShowService:
             sample_rate=rate,
             offset_s=offset_s,
         )
-        return store.commit(show, f"Music {path.name} ({duration:.1f} s)")
+        return self._commit(store, show, f"Music {path.name} ({duration:.1f} s)")
 
     # --- models and points ---
 
@@ -240,7 +320,7 @@ class ShowService:
         card.assets.mesh = record.id
         show.models[model_id] = card
         show.artifacts[record.id] = record
-        return store.commit(show, f"Add model {name} from {source.name}"), model_id
+        return self._commit(store, show, f"Add model {name} from {source.name}"), model_id
 
     def compute_points(
         self,
@@ -287,7 +367,7 @@ class ShowService:
         )
         show.artifacts[record.id] = record
         show.models[model_id].assets.point_sets[n] = record.id
-        store.commit(show, f"Points for {model_id}: {n} by {handle.info.id}")
+        self._commit(store, show, f"Points for {model_id}: {n} by {handle.info.id}")
         return record
 
     # --- program ---
@@ -336,8 +416,206 @@ class ShowService:
             rotation_deg=rotation_deg,
         )
         show.program.append(scene)
-        store.commit(show, f"Add scene {scene.title}")
+        self._commit(store, show, f"Add scene {scene.title}")
         return scene
+
+    # --- plugins ---
+
+    def set_plugin_enabled(self, plugin_id: str, enabled: bool) -> None:
+        """Enable or disable a plugin now and remember the choice in .atelier/ui_settings.json."""
+        self.registry.set_enabled(plugin_id, enabled)
+        disabled = set(self.config.ui_settings().get("disabled_plugins", []))
+        disabled = disabled - {plugin_id} if enabled else disabled | {plugin_id}
+        self.config.save_ui_settings({"disabled_plugins": sorted(disabled)})
+
+    # --- edits (UI and API) ---
+
+    def check_revision(self, store: ShowStore, base_revision: int | None) -> None:
+        """Refuse an edit made on an older revision (the UI reloads and shows the change)."""
+        if base_revision is not None:
+            current = store.current_revision()
+            if current != base_revision:
+                raise ConflictError(
+                    f"the show changed meanwhile (now revision {current}, "
+                    f"the edit was based on {base_revision})"
+                )
+
+    def _edit(self, store: ShowStore, message: str, change: Callable[[Show], None]) -> Show:
+        show = store.load()
+        try:
+            change(show)
+            show = Show.model_validate(show.model_dump(mode="json"))
+        except ValidationError as exc:
+            raise ServiceError(_validation_message(exc)) from exc
+        return self._commit(store, show, message)
+
+    def update_brief(self, store: ShowStore, changes: dict[str, Any]) -> Show:
+        unknown = set(changes) - BRIEF_FIELDS
+        if unknown:
+            raise ServiceError(f"brief fields that cannot be edited here: {sorted(unknown)}")
+
+        def change(show: Show) -> None:
+            show.brief = Brief.model_validate(show.brief.model_dump(mode="json") | changes)
+
+        return self._edit(store, "Brief: " + ", ".join(sorted(changes)), change)
+
+    def update_flight(self, store: ShowStore, changes: dict[str, Any]) -> Show:
+        def change(show: Show) -> None:
+            show.flight = FlightSettings.model_validate(
+                show.flight.model_dump(mode="json") | changes
+            )
+
+        return self._edit(store, "Flight: " + ", ".join(sorted(changes)), change)
+
+    def update_music(self, store: ShowStore, offset_s: float | None) -> Show:
+        def change(show: Show) -> None:
+            if show.audio is None:
+                raise ServiceError("the show has no music")
+            show.audio.offset_s = offset_s
+
+        return self._edit(store, f"Music offset {offset_s}", change)
+
+    def update_model(self, store: ShowStore, model_id: str, changes: dict[str, Any]) -> Show:
+        unknown = set(changes) - MODEL_FIELDS
+        if unknown:
+            raise ServiceError(f"model fields that cannot be edited here: {sorted(unknown)}")
+        show = store.load()
+        if model_id not in show.models:
+            raise ServiceError(f"no model {model_id!r}")
+        overrides = changes.get("pipeline_overrides") or {}
+        prov = Provenance(show, self.registry)
+        try:
+            for role, config in overrides.items():
+                if role not in ROLE_NAMES:
+                    raise ServiceError(f"unknown role {role!r}")
+                prov.stage(role, StageConfig.model_validate(config))
+        except Unavailable as exc:
+            raise ServiceError(exc.reason) from exc
+
+        def change(show: Show) -> None:
+            card = show.models[model_id]
+            show.models[model_id] = ModelCard.model_validate(
+                card.model_dump(mode="json") | changes | {"version": card.version + 1}
+            )
+
+        return self._edit(store, f"Model {model_id}: " + ", ".join(sorted(changes)), change)
+
+    def remove_model(self, store: ShowStore, model_id: str) -> Show:
+        """Remove a model card; its files stay in the project (nothing is deleted)."""
+
+        def change(show: Show) -> None:
+            if model_id not in show.models:
+                raise ServiceError(f"no model {model_id!r}")
+            users = [s.id for s in show.program if s.model_id == model_id]
+            if users:
+                raise ServiceError(f"model {model_id!r} is used by scenes {users}")
+            del show.models[model_id]
+
+        return self._edit(store, f"Remove model {model_id}", change)
+
+    def update_scene(self, store: ShowStore, scene_id: str, changes: dict[str, Any]) -> Show:
+        unknown = set(changes) - SCENE_FIELDS
+        if unknown:
+            raise ServiceError(f"scene fields that cannot be edited here: {sorted(unknown)}")
+        show = store.load()
+        index = _scene_index(show, scene_id)
+        try:
+            scene = Scene.model_validate(show.program[index].model_dump(mode="json") | changes)
+        except ValidationError as exc:
+            raise ServiceError(_validation_message(exc)) from exc
+        self._check_components(show, scene)
+
+        def change(show: Show) -> None:
+            show.program[index] = scene
+
+        return self._edit(store, f"Scene {scene_id}: " + ", ".join(sorted(changes)), change)
+
+    def _check_components(self, show: Show, scene: Scene) -> None:
+        prov = Provenance(show, self.registry)
+        try:
+            for track in scene.animation.tracks if scene.animation else []:
+                prov.stage(
+                    "animation_primitive",
+                    StageConfig(component=track.primitive, params=track.params),
+                )
+            if scene.transition_in.planner:
+                prov.stage(
+                    "transition_planner",
+                    StageConfig(
+                        component=scene.transition_in.planner, params=scene.transition_in.params
+                    ),
+                )
+        except Unavailable as exc:
+            raise ServiceError(exc.reason) from exc
+
+    def remove_scene(self, store: ShowStore, scene_id: str) -> Show:
+        def change(show: Show) -> None:
+            del show.program[_scene_index(show, scene_id)]
+
+        return self._edit(store, f"Remove scene {scene_id}", change)
+
+    def reorder_scenes(self, store: ShowStore, order: Sequence[str]) -> Show:
+        def change(show: Show) -> None:
+            if sorted(order) != sorted(s.id for s in show.program):
+                raise ServiceError("the new order must list every scene exactly once")
+            by_id = {s.id: s for s in show.program}
+            show.program = [by_id[i] for i in order]
+
+        return self._edit(store, "Reorder scenes: " + ", ".join(order), change)
+
+    def approve_stage(self, store: ShowStore, stage: str, status: str = "approved") -> Show:
+        def change(show: Show) -> None:
+            show.stage_status = {**show.stage_status, stage: status}  # type: ignore[dict-item]
+
+        return self._edit(store, f"Stage {stage}: {status}", change)
+
+    def revision_diff(self, store: ShowStore, old: int, new: int | None = None) -> list[DiffEntry]:
+        """What changed between two revisions, path by path (artifacts summarized)."""
+        try:
+            before = store.load_revision(old)
+            after = store.load() if new is None else store.load_revision(new)
+        except StoreError as exc:
+            raise ServiceError(str(exc)) from exc
+        return diff_shows(before, after)
+
+    def points_preview(
+        self, store: ShowStore, model_id: str, n: int | None = None
+    ) -> PointsPreview:
+        """A point set ready for the viewer: positions at the safe scale, colours, spacing."""
+        show = store.load()
+        if model_id not in show.models:
+            raise ServiceError(f"no model {model_id!r}")
+        prov = Provenance(show, self.registry)
+        n = n or prov.figure_drone_count(model_id)
+        record = prov.record(points_slot(model_id, n))
+        if record is None:
+            raise ServiceError(f"no points for {model_id} at {n} drones yet")
+        points = PointSet.load(store.path(record.path))
+        card = show.models[model_id]
+        scene = next((s for s in show.program if s.model_id == model_id), None) or Scene(
+            id="preview", title="preview", model_id=model_id, hold_s=1
+        )
+        placement = place(
+            points.positions,
+            card,
+            scene,
+            show.brief.fleet,
+            show.flight,
+            show.brief.viewer_direction,
+        )
+        world = placement.to_world(placement.local)
+        nearest = (
+            cKDTree(world).query(world, k=2)[0][:, 1] if len(world) > 1 else np.zeros(len(world))
+        )
+        return PointsPreview(
+            positions=world.astype(np.float32),
+            colors=linear_to_srgb8(figure_colors(card, points)),
+            nearest_m=nearest.astype(np.float32),
+            scale=placement.scale,
+            min_distance_m=show.brief.fleet.min_distance_m,
+            stale=prov.stale_reason(record.slot),
+            metrics=dict(points.meta.get("metrics", {})),
+        )
 
     # --- pipeline ---
 
@@ -353,7 +631,7 @@ class ShowService:
         except Unavailable as exc:
             raise ServiceError(exc.reason) from exc
         setattr(show.pipeline, role, config)
-        return store.commit(show, f"Pipeline {role}: {component} {json.dumps(params)}")
+        return self._commit(store, show, f"Pipeline {role}: {component} {json.dumps(params)}")
 
     def set_stage_list(self, store: ShowStore, which: str, components: Sequence[str]) -> Show:
         role: RoleName = {"validators": "validator_rule", "exporters": "exporter"}[which]  # type: ignore[assignment]
@@ -366,7 +644,7 @@ class ShowService:
         except Unavailable as exc:
             raise ServiceError(exc.reason) from exc
         setattr(show.pipeline, which, configs)
-        return store.commit(show, f"Pipeline {which}: {', '.join(components)}")
+        return self._commit(store, show, f"Pipeline {which}: {', '.join(components)}")
 
     # --- status ---
 
@@ -405,7 +683,7 @@ class ShowService:
         )
         show.artifacts[record.id] = record
         show.outputs.compiled = record.id
-        store.commit(show, f"Compile: {report.frames} frames, {report.duration_s:.1f} s")
+        self._commit(store, show, f"Compile: {report.frames} frames, {report.duration_s:.1f} s")
         return record, report
 
     def _fresh_compiled(
@@ -480,7 +758,7 @@ class ShowService:
         )
         show.artifacts[record.id] = record
         show.outputs.validation = record.id
-        store.commit(show, f"Validate: {errors} errors")
+        self._commit(store, show, f"Validate: {errors} errors")
         return ValidationSummary(
             ok=errors == 0,
             errors=errors,
@@ -557,5 +835,5 @@ class ShowService:
             show.artifacts[record.id] = record
             show.outputs.exports[handle.info.id] = record.id
             summaries.append(ExportSummary(handle.info.id, folder, list(result.files)))
-        store.commit(show, "Export: " + ", ".join(s.component for s in summaries))
+        self._commit(store, show, "Export: " + ", ".join(s.component for s in summaries))
         return summaries

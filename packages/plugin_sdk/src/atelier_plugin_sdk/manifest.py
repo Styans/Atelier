@@ -35,6 +35,10 @@ class PluginManifest(BaseModel):
     )
     requires_gpu: bool = False
     description: str = ""
+    settings: dict[str, str] = Field(
+        default_factory=dict,
+        description="Settings the plugin reads from [plugin_settings.<id>]: key -> description",
+    )
 
     @property
     def effective_namespace(self) -> str:

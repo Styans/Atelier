@@ -137,9 +137,18 @@ def _inline_refs(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 class PluginRegistry:
-    def __init__(self, plugins: Sequence[LoadedPlugin], config: Mapping[str, str] | None = None):
+    def __init__(
+        self,
+        plugins: Sequence[LoadedPlugin],
+        config: Mapping[str, str] | None = None,
+        *,
+        plugin_settings: Mapping[str, Mapping[str, str]] | None = None,
+        log_dir: Path | None = None,
+    ):
         self.plugins = list(plugins)
         self.config: Mapping[str, str] = dict(config or {})
+        self.plugin_settings = {k: dict(v) for k, v in (plugin_settings or {}).items()}
+        self.log_dir = log_dir
 
     # --- discovery ---
 
@@ -153,6 +162,7 @@ class PluginRegistry:
         cache_path: Path | None = None,
         log_dir: Path | None = None,
         use_entry_points: bool = True,
+        plugin_settings: Mapping[str, Mapping[str, str]] | None = None,
     ) -> PluginRegistry:
         """Load every plugin found; a broken plugin is reported, never fatal."""
         disabled_ids = set(disabled)
@@ -190,7 +200,7 @@ class PluginRegistry:
                 plugin.status = "disabled"
                 continue
             log_path = log_dir / f"{manifest.id}.log" if log_dir else None
-            _load(plugin, cache, log_path)
+            _load(plugin, cache, log_path, (plugin_settings or {}).get(manifest.id, {}))
             for info in plugin.components:
                 owner = seen_components.get(info.id)
                 if owner is not None:
@@ -201,7 +211,7 @@ class PluginRegistry:
                 seen_components.update({info.id: manifest.id for info in plugin.components})
         if cache_path is not None:
             _write_cache(cache_path, plugins)
-        return cls(plugins, config)
+        return cls(plugins, config, plugin_settings=plugin_settings, log_dir=log_dir)
 
     # --- lookup ---
 
@@ -243,7 +253,41 @@ class PluginRegistry:
     def _handle(self, plugin: LoadedPlugin, info: ComponentInfo) -> ComponentHandle:
         if not plugin.usable:
             raise ComponentNotFound(self._unusable(plugin))
-        return ComponentHandle(info, plugin, self.config)
+        settings = self.plugin_settings.get(plugin.manifest.id, {})
+        config = {**self.config, **{f"setting.{k}": v for k, v in settings.items()}}
+        return ComponentHandle(info, plugin, config)
+
+    # --- management ---
+
+    def set_enabled(self, plugin_id: str, enabled: bool) -> LoadedPlugin:
+        """Disable (stops its process) or re-enable a plugin without restarting the host."""
+        plugin = self.plugin(plugin_id)
+        if not enabled:
+            if plugin.runner is not None:
+                plugin.runner.close()
+            plugin.runner, plugin.status, plugin.error = None, "disabled", None
+        elif plugin.status == "disabled":
+            plugin.status, plugin.error = "ok", None
+            log_path = self.log_dir / f"{plugin_id}.log" if self.log_dir else None
+            _load(plugin, {}, log_path, self.plugin_settings.get(plugin_id, {}))
+        return plugin
+
+    def check_health(self, plugin_id: str) -> LoadedPlugin:
+        """Ask the plugin now (a subprocess plugin is started for this)."""
+        plugin = self.plugin(plugin_id)
+        if plugin.runner is None or plugin.status == "disabled":
+            return plugin
+        try:
+            plugin.health = plugin.runner.health()
+        except PluginError as exc:
+            plugin.status, plugin.error = "error", exc.message
+            return plugin
+        if plugin.health.status == "error":
+            plugin.status, plugin.error = "error", f"health check: {plugin.health.message}"
+        else:
+            plugin.status = "degraded" if plugin.health.status == "degraded" else "ok"
+            plugin.error = None
+        return plugin
 
     @staticmethod
     def _unusable(plugin: LoadedPlugin) -> str:
@@ -298,7 +342,12 @@ def _entry_point_manifests() -> list[tuple[Path, Path]]:
     return found
 
 
-def _load(plugin: LoadedPlugin, cache: dict[str, Any], log_path: Path | None) -> None:
+def _load(
+    plugin: LoadedPlugin,
+    cache: dict[str, Any],
+    log_path: Path | None,
+    settings: Mapping[str, str],
+) -> None:
     manifest = plugin.manifest
     if manifest.api_version != API_VERSION:
         plugin.status = "error"
@@ -309,7 +358,7 @@ def _load(plugin: LoadedPlugin, cache: dict[str, Any], log_path: Path | None) ->
             plugin.runner = InProcessRunner(_import_plugin(manifest, plugin.root))
             described = plugin.runner.describe()
         else:
-            runner = SubprocessRunner(manifest, plugin.root, log_path=log_path)
+            runner = SubprocessRunner(manifest, plugin.root, log_path=log_path, settings=settings)
             plugin.runner = runner
             key = f"{manifest.id}@{manifest.version}"
             described = cache.get(key) or runner.describe()

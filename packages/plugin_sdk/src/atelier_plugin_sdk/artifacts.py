@@ -341,9 +341,20 @@ class ArtifactRef(BaseModel):
 
 
 class MeshRef(ArtifactRef):
+    """A mesh: ``.npz`` (MeshData) or, from generators, a mesh file such as ``.glb``.
+
+    Mesh files are imported by the core (axes, colours) before other roles see them.
+    """
+
     kind: ClassVar[str] = "mesh"
 
+    @property
+    def is_mesh_data(self) -> bool:
+        return self.path.suffix.lower() == ".npz"
+
     def load(self) -> MeshData:
+        if not self.is_mesh_data:
+            raise ValueError(f"{self.path.name} is a mesh file; the core imports it into MeshData")
         return MeshData.load(self.path)
 
 

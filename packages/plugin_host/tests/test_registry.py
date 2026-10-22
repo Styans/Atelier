@@ -281,3 +281,95 @@ def test_plugin_in_its_own_venv(tmp_path: Path, mesh_ref: MeshRef) -> None:
 
     assert len(result.load()) == 7
     assert (root / ".venv").is_dir()
+
+
+SETTINGS_SOURCE = textwrap.dedent(
+    """
+    import json
+    import os
+
+    from pydantic import BaseModel
+
+    from atelier_plugin_sdk import Health, Plugin, PointDistributor
+
+    class Params(BaseModel):
+        pass
+
+    class Echo(PointDistributor[Params]):
+        name = "echo"
+        Params = Params
+
+        def distribute(self, ctx, source, n, params):
+            raise NotImplementedError
+
+    def health():
+        settings = json.loads(os.environ.get("ATELIER_PLUGIN_SETTINGS", "{}"))
+        paths = os.environ.get("ATELIER_SDK_PATHS", "")
+        return Health.ok(f"{settings.get('home')}|{bool(paths)}")
+
+    plugin = Plugin(components=[Echo()], health_check=health)
+    """
+)
+
+
+def test_settings_reach_the_subprocess(tmp_path: Path) -> None:
+    plugin_id = uid()
+    write_plugin(
+        tmp_path / "plugins",
+        plugin_id,
+        source=SETTINGS_SOURCE,
+        runtime="subprocess",
+        command=[
+            "{python}",
+            "-m",
+            "atelier_plugin_sdk.serve",
+            "--entry",
+            "{entry}",
+            "--path",
+            "{setting:src_dir}",
+        ],
+    )
+    src = str(tmp_path / "plugins" / plugin_id / "src")
+    settings = {plugin_id: {"home": r"C:\Some {odd} path", "src_dir": src}}
+
+    with discover(tmp_path / "plugins", plugin_settings=settings) as registry:
+        health = registry.plugin(plugin_id).health
+
+    assert health is not None and health.message == r"C:\Some {odd} path|True"
+
+
+def test_missing_setting_is_explained(tmp_path: Path) -> None:
+    plugin_id = uid()
+    write_plugin(
+        tmp_path / "plugins", plugin_id, runtime="subprocess", command=["{setting:python}", "x.py"]
+    )
+
+    with discover(tmp_path / "plugins") as registry:
+        error = registry.plugin(plugin_id).error or ""
+
+    assert f"[plugin_settings.{plugin_id}]" in error and "'python'" in error
+
+
+def test_disable_and_enable_at_runtime(tmp_path: Path) -> None:
+    plugin_id = uid()
+    write_plugin(tmp_path, plugin_id)
+
+    with discover(tmp_path) as registry:
+        registry.set_enabled(plugin_id, False)
+        with pytest.raises(ComponentNotFound, match="disabled"):
+            registry.resolve("point_distributor", plugin_id)
+        registry.set_enabled(plugin_id, True)
+        assert registry.resolve("point_distributor", plugin_id).info.name == "random"
+
+
+def test_health_on_request_starts_a_cached_subprocess(tmp_path: Path) -> None:
+    plugin_id = uid()
+    write_plugin(tmp_path / "plugins", plugin_id, runtime="subprocess")
+    cache = tmp_path / "cache.json"
+    discover(tmp_path / "plugins", cache_path=cache).close()
+
+    with discover(tmp_path / "plugins", cache_path=cache) as registry:
+        assert registry.plugin(plugin_id).health is None
+        plugin = registry.check_health(plugin_id)
+
+    assert plugin.health is not None and plugin.health.status == "ok"

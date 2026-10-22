@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,7 @@ from atelier_plugin_sdk.dispatch import invoke, normalize_params
 from atelier_plugin_sdk.roles import RoleName
 from atelier_plugin_sdk.rpc.codec import decode, dumps, encode, error_from_payload
 
+_SETTING = re.compile(r"\{setting:(\w+)\}")
 ProgressCallback = Callable[[float, str], None]
 LogCallback = Callable[[str, str], None]
 
@@ -127,9 +129,11 @@ class SubprocessRunner:
         call_timeout_s: float = 3600.0,
         request_timeout_s: float = 60.0,
         startup_timeout_s: float = 900.0,
+        settings: Mapping[str, str] | None = None,
     ) -> None:
         self.manifest = manifest
         self.root = root
+        self.settings = dict(settings or {})  # [plugin_settings.<id>] from atelier.toml
         self.log_path = log_path
         self.call_timeout_s = call_timeout_s
         self.request_timeout_s = request_timeout_s
@@ -168,12 +172,42 @@ class SubprocessRunner:
             "plugin_dir": str(self.root),
             "src": str(import_path),
         }
-        return [part.format(**values) for part in self.manifest.command]
+        return [
+            _SETTING.sub(self._setting, part).format(**values) for part in self.manifest.command
+        ]
+
+    def _setting(self, match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key not in self.settings:
+            raise PluginError(
+                f"plugin {self.manifest.id} needs setting {key!r}: add it to atelier.toml under "
+                f"[plugin_settings.{self.manifest.id}]"
+            )
+        # Escape braces so str.format leaves Windows paths and the like alone.
+        return self.settings[key].replace("{", "{{").replace("}", "}}")
+
+    def environment(self) -> dict[str, str]:
+        """What a plugin in a foreign venv needs: its settings and where the SDK lives."""
+        import atelier_domain
+        import atelier_plugin_sdk
+
+        sdk_paths = [
+            Path(m.__file__).resolve().parents[1]
+            for m in (atelier_plugin_sdk, atelier_domain)
+            if m.__file__
+        ]
+        return {
+            **os.environ,
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUNBUFFERED": "1",
+            "ATELIER_PLUGIN_SETTINGS": json.dumps(self.settings),
+            "ATELIER_SDK_PATHS": os.pathsep.join(str(p) for p in dict.fromkeys(sdk_paths)),
+        }
 
     def _start(self) -> subprocess.Popen[str]:
         if self._proc is not None and self._proc.poll() is None:
             return self._proc
-        env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
+        env = self.environment()
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
         self._proc = subprocess.Popen(
             self.command(),

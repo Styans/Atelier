@@ -8,7 +8,7 @@ import json
 import os
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +17,11 @@ from atelier_domain import Show
 SHOW_FILE = "show.json"
 LOCK_FILE = ".lock"
 STALE_LOCK_S = 120.0
+
+
+CommitListener = Callable[["ShowStore", Show, "RevisionInfo"], None]
+COMMIT_LISTENERS: list[CommitListener] = []
+"""Called after every commit (e.g. to update the API's index); errors are ignored."""
 
 
 class StoreError(Exception):
@@ -152,7 +157,10 @@ class ShowStore:
                 "a", encoding="utf-8", newline="\n"
             ) as f:
                 f.write(json.dumps(info.__dict__, ensure_ascii=False) + "\n")
-            return new
+        for listener in COMMIT_LISTENERS:
+            with contextlib.suppress(Exception):
+                listener(self, new, info)
+        return new
 
     def rollback(self, revision: int, author: str = "cli") -> Show:
         """Make the content of ``revision`` current again, as a new revision."""

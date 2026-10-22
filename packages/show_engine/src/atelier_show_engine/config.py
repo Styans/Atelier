@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,6 +54,7 @@ class AtelierConfig(_Section):
     blender: BlenderConfig = Field(default_factory=BlenderConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     fleet_presets: dict[str, FleetLimits] = Field(default_factory=dict)
+    plugin_settings: dict[str, dict[str, str]] = Field(default_factory=dict)
     pipeline: PipelineConfig = Field(default_factory=lambda: DEFAULT_PIPELINE.model_copy(deep=True))
 
     def resolve(self, path: Path) -> Path:
@@ -76,6 +79,29 @@ class AtelierConfig(_Section):
     @property
     def presets(self) -> Mapping[str, FleetLimits]:
         return {**BUILTIN_FLEET_PRESETS, **self.fleet_presets}
+
+    @property
+    def ui_settings_path(self) -> Path:
+        return self.cache_dir / "ui_settings.json"
+
+    def ui_settings(self) -> dict[str, Any]:
+        """Choices made in the UI (e.g. disabled plugins); atelier.toml stays hand-written."""
+        try:
+            data: dict[str, Any] = json.loads(self.ui_settings_path.read_text(encoding="utf-8"))
+            return data
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def save_ui_settings(self, values: dict[str, Any]) -> None:
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        merged = self.ui_settings() | values
+        self.ui_settings_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+
+    @property
+    def disabled_plugins(self) -> list[str]:
+        return sorted(
+            set(self.plugins.disabled) | set(self.ui_settings().get("disabled_plugins", []))
+        )
 
     def host_config(self) -> dict[str, str]:
         """Settings passed to plugins through ``RunContext.config``."""
