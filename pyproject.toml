@@ -10,6 +10,8 @@ dependencies = [
     "atelier-show-engine",
     "atelier-blender-bridge",
     "atelier-cli",
+    "atelier-jobs",
+    "atelier-worker",
     # Plugins are discovered from plugins/ at runtime; listing them here only installs
     # their dependencies into the platform environment.
     "atelier-builtin-animation",
@@ -32,7 +34,7 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["packages/*", "plugins/*", "apps/cli"]
+members = ["packages/*", "plugins/*", "apps/cli", "apps/worker"]
 # Pygmalion runs as a subprocess plugin in its own venv (torch/CUDA), see docs/DECISIONS.md.
 exclude = ["plugins/pygmalion"]
 
@@ -43,6 +45,8 @@ atelier-plugin-host = { workspace = true }
 atelier-show-engine = { workspace = true }
 atelier-blender-bridge = { workspace = true }
 atelier-cli = { workspace = true }
+atelier-jobs = { workspace = true }
+atelier-worker = { workspace = true }
 atelier-builtin-animation = { workspace = true }
 atelier-builtin-transitions = { workspace = true }
 atelier-builtin-validators = { workspace = true }
@@ -85,7 +89,9 @@ mypy_path = [
     "packages/plugin_host/src",
     "packages/show_engine/src",
     "packages/blender_bridge/src",
+    "packages/jobs/src",
     "apps/cli/src",
+    "apps/worker/src",
 ]
 
 [[tool.mypy.overrides]]

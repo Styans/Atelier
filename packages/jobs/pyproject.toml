@@ -1,0 +1,13 @@
+[project]
+name = "atelier-jobs"
+version = "0.1.0"
+description = "The job queue and the shows index in SQLite, shared by the API and the worker"
+requires-python = ">=3.12"
+dependencies = [
+    "atelier-show-engine",
+    "sqlmodel>=0.0.22",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.4,<0.14"]
+build-backend = "uv_build"

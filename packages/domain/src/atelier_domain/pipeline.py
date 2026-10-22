@@ -17,3 +17,5 @@ class PipelineConfig(DomainModel):
     transition_planner: StageConfig
     validators: list[StageConfig] = Field(default_factory=list)
     exporters: list[StageConfig] = Field(default_factory=list)
+    image_generator: StageConfig | None = Field(None, description="Concept images")
+    mesh_generator: StageConfig | None = Field(None, description="Image -> 3D model")

@@ -33,6 +33,7 @@ from atelier_domain import (
     TransitionSpec,
     Vec3,
     ViewerDirection,
+    derive_seed,
     fingerprint,
     fleet_from_preset,
 )
@@ -40,6 +41,7 @@ from atelier_domain.ids import new_show_id, unique_id
 from atelier_plugin_host import PluginRegistry
 from atelier_plugin_sdk import (
     CompiledShowRef,
+    ImageRef,
     MeshRef,
     PluginError,
     PointSet,
@@ -67,7 +69,12 @@ from atelier_show_engine.provenance import (
 from atelier_show_engine.store import ConflictError, ShowStore, StoreError
 
 Progress = Callable[[float, str], None]
-SINGLE_STAGE_ROLES: tuple[RoleName, ...] = ("point_distributor", "transition_planner")
+SINGLE_STAGE_ROLES: tuple[RoleName, ...] = (
+    "point_distributor",
+    "transition_planner",
+    "image_generator",
+    "mesh_generator",
+)
 
 
 BRIEF_FIELDS = frozenset(
@@ -368,6 +375,161 @@ class ShowService:
         show.artifacts[record.id] = record
         show.models[model_id].assets.point_sets[n] = record.id
         self._commit(store, show, f"Points for {model_id}: {n} by {handle.info.id}")
+        return record
+
+    # --- generation (roles image_generator / mesh_generator) ---
+
+    def _generator_stage(self, show: Show, model_id: str, role: RoleName) -> StageConfig:
+        card = show.models[model_id]
+        config: StageConfig | None = card.pipeline_overrides.get(role) or getattr(
+            show.pipeline, role
+        )
+        if config is None:
+            raise ServiceError(f"no {role} in the pipeline; choose one first (pipeline set {role})")
+        return config
+
+    def generate_concepts(
+        self,
+        store: ShowStore,
+        model_id: str,
+        prompt: str,
+        n: int = 4,
+        on_progress: Progress | None = None,
+    ) -> ArtifactRecord:
+        """Concept images for a model card; every set is kept, never overwritten."""
+        show = store.load()
+        if model_id not in show.models:
+            raise ServiceError(f"no model {model_id!r}")
+        card = show.models[model_id]
+        prov = Provenance(show, self.registry)
+        try:
+            config = self._generator_stage(show, model_id, "image_generator")
+            handle, params = prov.stage("image_generator", config)
+        except Unavailable as exc:
+            raise ServiceError(exc.reason) from exc
+        slot = f"models.{model_id}.concepts"
+        expectation = Expectation(
+            producer=producer_for(handle),
+            params={
+                "component": params,
+                "prompt": prompt,
+                "negative": card.negative_prompt,
+                "n": n,
+            },
+            seed=derive_seed(show.seed, f"{slot}.{len(card.assets.concepts)}"),
+            inputs=[],
+        )
+        fp = fingerprint(expectation.producer, expectation.params, expectation.seed, [])
+        with self._work(store) as workdir:
+            try:
+                ref = handle.invoke(
+                    {"prompt": prompt, "negative": card.negative_prompt, "n": n},
+                    params,
+                    seed=expectation.seed or 0,
+                    workdir=workdir,
+                    on_progress=on_progress,
+                )
+            except PluginError as exc:
+                raise ServiceError(f"{handle.info.id}: {exc.message}") from exc
+            folder = store.new_file(f"models/{model_id}", "concepts", fp, "")
+            folder.mkdir(parents=True)
+            names = list(ref.meta.get("files") or sorted(p.name for p in ref.path.iterdir()))
+            for name in names:
+                shutil.copyfile(ref.path / name, folder / name)
+        record = new_record(
+            kind="image_set",
+            slot=slot,
+            path=store.relative(folder),
+            expectation=expectation,
+            input_records=[],
+            content_hash=_dir_hash(folder),
+        )
+        show.artifacts[record.id] = record
+        card.assets.concepts.append(record.id)
+        card.image_prompt = prompt
+        self._commit(store, show, f"Concepts for {model_id}: {len(names)} by {handle.info.id}")
+        return record
+
+    def concept_images(self, store: ShowStore, model_id: str) -> list[str]:
+        """Every concept image of a model as ``<artifact id>/<file name>``, newest set first."""
+        show = store.load()
+        if model_id not in show.models:
+            raise ServiceError(f"no model {model_id!r}")
+        result = []
+        for artifact_id in reversed(show.models[model_id].assets.concepts):
+            folder = store.path(show.artifacts[artifact_id].path)
+            result += [f"{artifact_id}/{p.name}" for p in sorted(folder.iterdir()) if p.is_file()]
+        return result
+
+    def generate_mesh(
+        self,
+        store: ShowStore,
+        model_id: str,
+        concept: str | None = None,
+        on_progress: Progress | None = None,
+    ) -> ArtifactRecord:
+        """A 3D model from a concept image; it becomes the model's current mesh (ADR-027)."""
+        show = store.load()
+        if model_id not in show.models:
+            raise ServiceError(f"no model {model_id!r}")
+        card = show.models[model_id]
+        concept = (
+            concept
+            or card.assets.selected_concept
+            or next(iter(self.concept_images(store, model_id)), None)
+        )
+        if concept is None:
+            raise ServiceError(f"model {model_id!r} has no concept images yet")
+        artifact_id, _, file_name = concept.partition("/")
+        concept_record = show.artifacts.get(artifact_id)
+        if concept_record is None or not (store.path(concept_record.path) / file_name).is_file():
+            raise ServiceError(f"no concept image {concept!r}")
+        prov = Provenance(show, self.registry)
+        try:
+            config = self._generator_stage(show, model_id, "mesh_generator")
+            handle, params = prov.stage("mesh_generator", config)
+        except Unavailable as exc:
+            raise ServiceError(exc.reason) from exc
+        expectation = Expectation(
+            producer=producer_for(handle),
+            params={"component": params, "concept": concept},
+            seed=derive_seed(show.seed, f"models.{model_id}.mesh.{concept}"),
+            inputs=[],
+        )
+        fp = fingerprint(
+            expectation.producer, expectation.params, expectation.seed, [concept_record.fingerprint]
+        )
+        with self._work(store) as workdir:
+            try:
+                ref = handle.invoke(
+                    {"source": ImageRef(path=store.path(concept_record.path) / file_name)},
+                    params,
+                    seed=expectation.seed or 0,
+                    workdir=workdir,
+                    on_progress=on_progress,
+                )
+            except PluginError as exc:
+                raise ServiceError(f"{handle.info.id}: {exc.message}") from exc
+            if ref.is_mesh_data:
+                mesh = ref.load()
+            else:
+                asset = copy_asset(store.root, ref.path)
+                mesh = load_mesh_file(store.path(asset.path), "y")
+        target = store.new_file(f"models/{model_id}", "mesh", fp, ".npz")
+        mesh.save(target)
+        record = new_record(
+            kind="mesh",
+            slot=mesh_slot(model_id),
+            path=store.relative(target),
+            expectation=expectation,
+            input_records=[concept_record],
+            content_hash=mesh.content_hash(),
+        )
+        show.artifacts[record.id] = record
+        card.assets.mesh = record.id
+        card.assets.selected_concept = concept
+        card.status = "ready"
+        self._commit(store, show, f"Mesh for {model_id} from {concept} by {handle.info.id}")
         return record
 
     # --- program ---

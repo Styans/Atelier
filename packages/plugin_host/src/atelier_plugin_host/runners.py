@@ -248,10 +248,15 @@ class SubprocessRunner:
                 continue
             on_progress, on_log = self._callbacks
             params = message.get("params", {})
-            if message.get("method") == "atelier.progress" and on_progress:
-                on_progress(float(params.get("fraction", 0.0)), str(params.get("message", "")))
-            elif message.get("method") == "atelier.log" and on_log:
-                on_log(str(params.get("level", "info")), str(params.get("message", "")))
+            try:
+                if message.get("method") == "atelier.progress" and on_progress:
+                    on_progress(float(params.get("fraction", 0.0)), str(params.get("message", "")))
+                elif message.get("method") == "atelier.log" and on_log:
+                    on_log(str(params.get("level", "info")), str(params.get("message", "")))
+            except Exception:
+                # A callback that raises asks to stop (e.g. the user cancelled the job): tell the
+                # plugin instead of letting the exception kill this reader thread.
+                self._send_cancel(str(params.get("call_id", "")))
         # The process is gone: let it finish and drain stderr so the error says why.
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.wait(timeout=10)
@@ -259,6 +264,20 @@ class SubprocessRunner:
             thread.join(timeout=5)
         for waiter in list(self._pending.values()):
             waiter.put({"error": {"code": 1001, "message": self._exit_message()}})
+
+    def _send_cancel(self, call_id: str) -> None:
+        proc = self._proc
+        if proc is None or proc.stdin is None or not call_id:
+            return
+        message = {
+            "jsonrpc": "2.0",
+            "id": None,
+            "method": "atelier.cancel",
+            "params": {"call_id": call_id},
+        }
+        with self._lock, contextlib.suppress(OSError, ValueError):
+            proc.stdin.write(dumps(message) + "\n")
+            proc.stdin.flush()
 
     def _read_stderr(self, proc: subprocess.Popen[str]) -> None:
         assert proc.stderr is not None

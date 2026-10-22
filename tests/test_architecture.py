@@ -25,6 +25,18 @@ CORE_ALLOWED: dict[str, frozenset[str]] = {
         {"atelier_domain", "atelier_plugin_sdk", "atelier_plugin_host"}
     ),
     "atelier_blender_bridge": frozenset({"atelier_domain"}),
+    "atelier_jobs": frozenset(
+        {"atelier_domain", "atelier_plugin_sdk", "atelier_plugin_host", "atelier_show_engine"}
+    ),
+    "atelier_worker": frozenset(
+        {
+            "atelier_domain",
+            "atelier_plugin_sdk",
+            "atelier_plugin_host",
+            "atelier_show_engine",
+            "atelier_jobs",
+        }
+    ),
     "atelier_cli": frozenset(
         {
             "atelier_domain",
