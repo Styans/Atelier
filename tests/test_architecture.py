@@ -28,6 +28,15 @@ CORE_ALLOWED: dict[str, frozenset[str]] = {
     "atelier_jobs": frozenset(
         {"atelier_domain", "atelier_plugin_sdk", "atelier_plugin_host", "atelier_show_engine"}
     ),
+    "atelier_api": frozenset(
+        {
+            "atelier_domain",
+            "atelier_plugin_sdk",
+            "atelier_plugin_host",
+            "atelier_show_engine",
+            "atelier_jobs",
+        }
+    ),
     "atelier_worker": frozenset(
         {
             "atelier_domain",

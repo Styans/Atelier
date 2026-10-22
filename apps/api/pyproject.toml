@@ -1,0 +1,17 @@
+[project]
+name = "atelier-api"
+version = "0.1.0"
+description = "Atelier HTTP API: REST + SSE over the show service, serves the web UI"
+requires-python = ">=3.12"
+dependencies = [
+    "atelier-jobs",
+    "atelier-plugin-host",
+    "atelier-show-engine",
+    "fastapi>=0.115",
+    "python-multipart>=0.0.18",
+    "uvicorn>=0.32",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.4,<0.14"]
+build-backend = "uv_build"

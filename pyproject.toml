@@ -12,6 +12,7 @@ dependencies = [
     "atelier-cli",
     "atelier-jobs",
     "atelier-worker",
+    "atelier-api",
     # Plugins are discovered from plugins/ at runtime; listing them here only installs
     # their dependencies into the platform environment.
     "atelier-builtin-animation",
@@ -24,6 +25,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "httpx>=0.27",
     "mypy>=1.13",
     "pytest>=8.3",
     "ruff>=0.8",
@@ -34,7 +36,7 @@ dev = [
 package = false
 
 [tool.uv.workspace]
-members = ["packages/*", "plugins/*", "apps/cli", "apps/worker"]
+members = ["packages/*", "plugins/*", "apps/cli", "apps/worker", "apps/api"]
 # Pygmalion runs as a subprocess plugin in its own venv (torch/CUDA), see docs/DECISIONS.md.
 exclude = ["plugins/pygmalion"]
 
@@ -47,6 +49,7 @@ atelier-blender-bridge = { workspace = true }
 atelier-cli = { workspace = true }
 atelier-jobs = { workspace = true }
 atelier-worker = { workspace = true }
+atelier-api = { workspace = true }
 atelier-builtin-animation = { workspace = true }
 atelier-builtin-transitions = { workspace = true }
 atelier-builtin-validators = { workspace = true }
@@ -67,6 +70,10 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "PTH", "RUF"]
 # N818: error names are part of the plugin contract (InvalidParams, Cancelled, ...).
 # UP046/UP047: TypeVar generics read better than PEP 695 for the role base classes.
 ignore = ["N818", "UP046", "UP047"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI declares parameters through these calls in defaults.
+extend-immutable-calls = ["fastapi.File", "fastapi.Form", "fastapi.Query", "fastapi.Depends"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["atelier_*"]
@@ -92,6 +99,7 @@ mypy_path = [
     "packages/jobs/src",
     "apps/cli/src",
     "apps/worker/src",
+    "apps/api/src",
 ]
 
 [[tool.mypy.overrides]]
@@ -106,6 +114,10 @@ minversion = "8.0"
 testpaths = ["tests", "packages", "plugins", "apps"]
 # Slow tests (separate venvs, real Blender builds) run with: uv run pytest -m slow
 addopts = ["-ra", "--import-mode=importlib", "--strict-markers", "-m", "not slow"]
+filterwarnings = [
+    # Starlette asks for httpx2 in its test client; nothing in our code depends on it.
+    "ignore:Using `httpx` with `starlette.testclient`",
+]
 markers = [
     "blender: needs a local Blender (path from atelier.toml); skipped otherwise",
     "slow: spawns subprocesses or builds separate environments",
