@@ -85,13 +85,17 @@ def run_job(
     except Exception as exc:  # Pygmalion's UserError / BackendUnavailable carry readable text
         raise PluginError(str(exc)) from exc
     low, high = span
+    last: tuple[float, str] | None = None
     while job.status not in ("done", "error", "cancelled"):
         if ctx.cancelled():
             m.cancel(job.id)
-        try:
-            ctx.progress(low + (high - low) * float(job.progress), str(job.stage))
-        except PluginError:
-            m.cancel(job.id)  # the host asked to stop
+        state = (low + (high - low) * float(job.progress), str(job.stage))
+        if state != last:  # polling is fast; tell the host only what changed
+            last = state
+            try:
+                ctx.progress(*state)
+            except PluginError:
+                m.cancel(job.id)  # the host asked to stop
         time.sleep(POLL_S)
     if job.status == "cancelled":
         raise PluginError("cancelled")
