@@ -55,6 +55,17 @@ def test_model_edits_validate_overrides(service: ShowService, store: ShowStore) 
         )
 
 
+def test_empty_card_waits_for_a_mesh(service: ShowService, store: ShowStore) -> None:
+    _, model_id = service.create_model(store, "Орёл", target_height_m=20)
+
+    card = store.load().models[model_id]
+    assert card.name == "Орёл" and card.assets.mesh is None
+    with pytest.raises(ServiceError, match="no 3D model yet"):
+        service.compute_points(store, model_id)
+    with pytest.raises(ServiceError, match="unknown model fields"):
+        service.create_model(store, "X", wings=2)
+
+
 def test_model_in_use_cannot_be_removed(service: ShowService, store: ShowStore) -> None:
     with pytest.raises(ServiceError, match="used by scenes"):
         service.remove_model(store, "m_torus")

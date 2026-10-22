@@ -353,6 +353,10 @@ class ShowService:
         show = store.load()
         if model_id not in show.models:
             raise ServiceError(f"no model {model_id!r}; models: {', '.join(show.models) or 'none'}")
+        if show.models[model_id].assets.mesh is None:
+            raise ServiceError(
+                f"model {model_id!r} has no 3D model yet: import a file or generate one"
+            )
         prov = Provenance(show, self.registry)
         n = n or prov.figure_drone_count(model_id)
         slot = points_slot(model_id, n)
