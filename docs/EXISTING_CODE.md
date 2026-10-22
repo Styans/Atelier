@@ -41,10 +41,15 @@
 `formation_source` / `builtin_formations`, фаза 4 (заливка уже работает через плоский меш).
 Палитра/квантизация цветов — в ядре платформы.
 
-**Просьбы к автору Pointille (до фазы 1):**
-1. Закоммитить ядро 0.9.0 в `main` (блокер: Atelier подключает Pointille через uv path-source
-   `../Pointille`). Могу сделать сам на ветке `atelier-integration` — только по явному «да».
-2. По желанию: убрать или дописать `pointille.cli`.
+**Сделано (2026-10-22, с согласия автора):** состояние worktree 0.9.0 закоммичено в новую ветку
+`atelier-integration` (коммит `468fa98`) через временный индекс — worktree, его ветка и `main` не
+тронуты. На этом коммите проходят 34 теста ядра Pointille. Atelier зависит от этой ветки (ADR-013).
+Остаётся по желанию: влить ветку в `main`; убрать или дописать `pointille.cli`.
+
+**Соответствие интерфейсам SPEC §8.2.** `distribute` → компонент `pointille.blue_noise`;
+`PointSet` → `atelier_plugin_sdk.PointSet`; `evaluate` → `PointSet.evaluate(faces, vertices)` (SDK);
+`min_safe_scale` → `show_engine.geometry.min_safe_scale`; метрики → `PointSet.meta["metrics"]`
+(min/mean NN, CV, отношения к идеальной гексагональной упаковке).
 
 **Замечания.** Расстояния 3D-евклидовы (тонкие части модели «чувствуют» обе стороны);
 `up_axis=2` (Z-up) по умолчанию совпадает с нашей конвенцией; основной цикл WSE на чистом Python

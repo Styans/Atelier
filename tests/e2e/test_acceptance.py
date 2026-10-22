@@ -125,7 +125,7 @@ def test_reference_show_matches_golden(reference: tuple[ShowStore, CompiledShow]
         "content_hash": compiled.content_hash(),
     }
     if os.environ.get("ATELIER_UPDATE_GOLDEN") or not GOLDEN.exists():
-        GOLDEN.write_text(json.dumps(actual, indent=2) + "\n", encoding="utf-8")
+        GOLDEN.write_text(json.dumps(actual, indent=2) + "\n", encoding="utf-8", newline="\n")
     golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
 
     assert {k: v for k, v in actual.items() if k != "content_hash"} == {

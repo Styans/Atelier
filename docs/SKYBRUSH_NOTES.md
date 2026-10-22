@@ -105,6 +105,12 @@ vertex group. `create_formation(name, points)` в `plugin/model/formation.py:44`
 Оценка размера: ~11 байт на ключ в сжатом `.blend` → 500 дронов × 18 000 кадров × 7 каналов
 ≈ 700 MB без прореживания. В фазе 1 — прореживание ключей (RDP с допуском) перед сборкой.
 
+## Сборка шоу в фазе 1 (проверено)
+`plugins/blender_skybrush` + `blender_bridge/scripts/build_show.py` собирают `.blend` на 150 дронов
+(165 с, 30 fps): 1.3 MB, ошибка позиций на выборке кадров < 5 см. Отдельный процесс Blender
+(`inspect_show.py`) открывает файл и видит 150 дронов «Drone 1…150», сторибординг
+TAKEOFF / SHOW / SHOW / LANDING (все MANUAL), звуковой стрип и пороги safety из флота.
+
 ## Что не работает в `-b` (по коду)
 - Операторы, вызывающие `redraw_all_3d_views()` (нужен `context.screen`): `run_full_proximity_check`
   (после расчёта), `remove_light_effect`, `invalidate_light_effect_pixel_cache`, `update_pyro_params`.
