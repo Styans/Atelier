@@ -104,7 +104,7 @@ mypy_path = [
 
 [[tool.mypy.overrides]]
 # Libraries without type information.
-module = ["scipy.*", "trimesh.*", "soundfile.*", "pointille.*"]
+module = ["scipy.*", "trimesh.*", "soundfile.*", "pointille.*", "dronegen_server.*"]
 ignore_missing_imports = true
 
 # --- pytest -----------------------------------------------------------------
@@ -121,4 +121,5 @@ filterwarnings = [
 markers = [
     "blender: needs a local Blender (path from atelier.toml); skipped otherwise",
     "slow: spawns subprocesses or builds separate environments",
+    "pygmalion: needs Pygmalion's runtime (its own venv); skipped otherwise",
 ]

@@ -255,21 +255,27 @@ name = "atelier-cli"
 version = "0.1.0"
 source = { editable = "apps/cli" }
 dependencies = [
+    { name = "atelier-api" },
     { name = "atelier-blender-bridge" },
     { name = "atelier-domain" },
+    { name = "atelier-jobs" },
     { name = "atelier-plugin-host" },
     { name = "atelier-plugin-sdk" },
     { name = "atelier-show-engine" },
+    { name = "atelier-worker" },
     { name = "typer" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "atelier-api", editable = "apps/api" },
     { name = "atelier-blender-bridge", editable = "packages/blender_bridge" },
     { name = "atelier-domain", editable = "packages/domain" },
+    { name = "atelier-jobs", editable = "packages/jobs" },
     { name = "atelier-plugin-host", editable = "packages/plugin_host" },
     { name = "atelier-plugin-sdk", editable = "packages/plugin_sdk" },
     { name = "atelier-show-engine", editable = "packages/show_engine" },
+    { name = "atelier-worker", editable = "apps/worker" },
     { name = "typer", specifier = ">=0.15" },
 ]
 

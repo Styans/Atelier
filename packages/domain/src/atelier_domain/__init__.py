@@ -1,6 +1,6 @@
 """Pydantic schemas of the show domain: brief, fleet, model cards, scenes, show."""
 
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
 from atelier_domain.animation import (
     AnimationSpec,
@@ -29,7 +29,10 @@ from atelier_domain.pipeline import PipelineConfig, StageConfig
 from atelier_domain.scene import Scene, TransitionSpec
 from atelier_domain.show import SCHEMA_VERSION, FlightSettings, Show, ShowOutputs, StageName
 
-__version__ = version("atelier-domain")
+try:
+    __version__ = version("atelier-domain")
+except PackageNotFoundError:  # imported from source, e.g. by a plugin in another venv
+    __version__ = "0.0.0+source"
 
 __all__ = [
     "BUILTIN_FLEET_PRESETS",

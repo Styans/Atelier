@@ -37,11 +37,13 @@ music_app = typer.Typer(help="The show's music.", no_args_is_help=True)
 scene_app = typer.Typer(help="Scenes of the program.", no_args_is_help=True)
 pipeline_app = typer.Typer(help="Which component runs each stage.", no_args_is_help=True)
 plugin_app = typer.Typer(help="Plugins: list, create, test.", no_args_is_help=True)
+generate_app = typer.Typer(help="Generation: concept images and 3D models.", no_args_is_help=True)
 app.add_typer(fleet_app, name="fleet")
 app.add_typer(music_app, name="music")
 app.add_typer(scene_app, name="scene")
 app.add_typer(pipeline_app, name="pipeline")
 app.add_typer(plugin_app, name="plugin")
+app.add_typer(generate_app, name="generate")
 
 console = Console(highlight=False)
 SHOW_ENV = "ATELIER_SHOW"
@@ -299,7 +301,9 @@ def music_set(
 
 @app.command("add-model")
 def add_model(
-    glb: Annotated[Path, typer.Option("--glb", help="GLB/GLTF/OBJ/STL/PLY file")],
+    glb: Annotated[
+        Path | None, typer.Option("--glb", help="GLB/GLTF/OBJ/STL/PLY file (none: empty card)")
+    ] = None,
     name: str | None = None,
     height: Annotated[
         float | None, typer.Option(help="Figure height, m (default: from spacing)")
@@ -309,8 +313,20 @@ def add_model(
     palette: Annotated[list[str] | None, typer.Option(help="Hex colour, repeatable")] = None,
     show: ShowOption = None,
 ) -> None:
-    """Import a 3D model as a model card."""
+    """Import a 3D model as a model card, or create an empty card for generation."""
     with service() as svc:
+        if glb is None:
+            if not name:
+                raise ServiceError("an empty model card needs --name")
+            _, model_id = svc.create_model(
+                open_show(svc, show),
+                name,
+                target_height_m=height,
+                color_source=color_source,
+                palette=palette or [],
+            )
+            console.print(f"model [bold]{model_id}[/bold] (empty card: generate images, then mesh)")
+            return
         _, model_id = svc.add_model(
             open_show(svc, show),
             glb,
@@ -333,6 +349,46 @@ def points(
     with service() as svc:
         record = svc.compute_points(open_show(svc, show), model, n, on_progress=progress_printer())
         console.print(f"{record.slot} by {record.producer.component} -> {record.path}")
+
+
+@generate_app.command("images")
+def generate_images(
+    model: str,
+    prompt: Annotated[str, typer.Option(help="What to draw")],
+    n: Annotated[int, typer.Option(help="How many concepts")] = 4,
+    show: ShowOption = None,
+) -> None:
+    """Concept images for a model with the pipeline's image_generator (GPU)."""
+    with service() as svc:
+        store = open_show(svc, show)
+        record = svc.generate_concepts(store, model, prompt, n, on_progress=progress_printer())
+        console.print(f"{record.slot} by {record.producer.component} -> {record.path}")
+        for concept in svc.concept_images(store, model):
+            console.print(f"  {concept}")
+
+
+@generate_app.command("mesh")
+def generate_mesh(
+    model: str,
+    concept: Annotated[
+        str | None, typer.Option(help="<artifact>/<file> (default: selected or newest concept)")
+    ] = None,
+    show: ShowOption = None,
+) -> None:
+    """A 3D model from a concept image with the pipeline's mesh_generator (GPU)."""
+    with service() as svc:
+        record = svc.generate_mesh(
+            open_show(svc, show), model, concept, on_progress=progress_printer()
+        )
+        console.print(f"{record.slot} by {record.producer.component} -> {record.path}")
+
+
+@app.command()
+def worker() -> None:
+    """Run the job worker in this terminal (the UI starts one by itself)."""
+    from atelier_worker.worker import main as worker_main
+
+    raise typer.Exit(worker_main())
 
 
 @scene_app.command("add")

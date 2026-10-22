@@ -329,6 +329,20 @@ class ShowService:
         show.artifacts[record.id] = record
         return self._commit(store, show, f"Add model {name} from {source.name}"), model_id
 
+    def create_model(self, store: ShowStore, name: str, **fields: Any) -> tuple[Show, str]:
+        """An empty model card, to be filled by generation (concepts, then a 3D model)."""
+        unknown = set(fields) - MODEL_FIELDS
+        if unknown:
+            raise ServiceError(f"unknown model fields: {sorted(unknown)}")
+        show = store.load()
+        model_id = unique_id("m", name, show.models.keys())
+        try:
+            card = ModelCard.model_validate({"id": model_id, "name": name, **fields})
+        except ValidationError as exc:
+            raise ServiceError(_validation_message(exc)) from exc
+        show.models[model_id] = card
+        return self._commit(store, show, f"New model card {name}"), model_id
+
     def compute_points(
         self,
         store: ShowStore,

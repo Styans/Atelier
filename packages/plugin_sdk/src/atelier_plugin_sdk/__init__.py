@@ -1,6 +1,6 @@
 """Plugin SDK: roles, artifact types, subprocess server, plugin template and contract tests."""
 
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
 from atelier_plugin_sdk.artifacts import (
     ArtifactRef,
@@ -48,7 +48,10 @@ from atelier_plugin_sdk.roles import (
     ValidatorRule,
 )
 
-__version__ = version("atelier-plugin-sdk")
+try:
+    __version__ = version("atelier-plugin-sdk")
+except PackageNotFoundError:  # imported from source, e.g. by a plugin in another venv
+    __version__ = "0.0.0+source"
 
 __all__ = [
     "API_VERSION",

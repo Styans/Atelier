@@ -132,7 +132,7 @@ class SubprocessRunner:
         settings: Mapping[str, str] | None = None,
     ) -> None:
         self.manifest = manifest
-        self.root = root
+        self.root = root.resolve()  # {plugin_dir} must not depend on the cwd
         self.settings = dict(settings or {})  # [plugin_settings.<id>] from atelier.toml
         self.log_path = log_path
         self.call_timeout_s = call_timeout_s

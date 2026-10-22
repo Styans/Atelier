@@ -28,3 +28,6 @@ Thumbs.db
 
 # Generated test inputs (tests/fixtures/make_fixtures.py)
 tests/fixtures/generated/
+
+# uv-managed Python for this repo (see pyproject [tool.uv])
+.python/

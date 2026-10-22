@@ -1,0 +1,15 @@
+id = "pygmalion"
+name = "Pygmalion"
+version = "0.1.0"
+api_version = "1"
+roles = ["image_generator", "mesh_generator"]
+runtime = "subprocess"
+entry = "atelier_pygmalion:plugin"
+command = ["{setting:python}", "{plugin_dir}/bootstrap.py", "--entry", "{entry}"]
+requires_gpu = true
+description = "Text -> concept images -> 3D model on the local GPU (Pygmalion / DroneGen)"
+
+[settings]
+python = 'Python of the Pygmalion venv: ...\Pygmalion\runtime\venv\Scripts\python.exe'
+home = 'Pygmalion runtime folder (weights, outputs): ...\Pygmalion\runtime'
+server_dir = 'Pygmalion server sources, preferred over the installed copy: ...\Pygmalion\server'

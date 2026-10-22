@@ -23,3 +23,9 @@ timeout_s = 1800
 # altitude_min_m = 2.5
 # altitude_max_m = 120.0
 # takeoff_grid_spacing_m = 3.0
+
+# Pygmalion runs in its own venv; nothing is installed into it (ADR-026).
+[plugin_settings.pygmalion]
+python = 'C:\Users\Beacon\Repo\Pygmalion\runtime\venv\Scripts\python.exe'
+home = 'C:\Users\Beacon\Repo\Pygmalion\runtime'
+server_dir = 'C:\Users\Beacon\Repo\Pygmalion\server'

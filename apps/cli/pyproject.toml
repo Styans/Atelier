@@ -10,6 +10,9 @@ dependencies = [
     "atelier-plugin-host",
     "atelier-show-engine",
     "atelier-blender-bridge",
+    "atelier-jobs",
+    "atelier-worker",
+    "atelier-api",
 ]
 
 [project.scripts]

@@ -53,6 +53,9 @@ CORE_ALLOWED: dict[str, frozenset[str]] = {
             "atelier_plugin_host",
             "atelier_show_engine",
             "atelier_blender_bridge",
+            "atelier_jobs",
+            "atelier_worker",
+            "atelier_api",
         }
     ),
 }
@@ -134,12 +137,14 @@ def test_core_packages_respect_layering() -> None:
 
 
 def test_plugins_use_only_public_core() -> None:
+    """Plugin code (not its tests, which may drive it through the host) uses the public core."""
     private_core = set(CORE_ALLOWED) - PLUGIN_ALLOWED_CORE
     violations = [
         f"{file.relative_to(ROOT)} imports {sorted(hits)}"
         for manifest in ROOT.glob("plugins/*/atelier-plugin.toml")
         for file in python_files(manifest.parent)
-        if (hits := imported_roots(file.read_text(encoding="utf-8"), str(file)) & private_core)
+        if "tests" not in file.relative_to(manifest.parent).parts
+        and (hits := imported_roots(file.read_text(encoding="utf-8"), str(file)) & private_core)
     ]
     assert not violations, "\n".join(violations)
 
