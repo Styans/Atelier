@@ -318,9 +318,13 @@ class CompiledShow:
         )
 
     def content_hash(self) -> str:
-        meta = self._meta()
-        meta.pop("audio")  # the audio path depends on where the project lives
-        return arrays_hash({"positions": self.positions, "colors": self.colors}, meta)
+        """Hash of what flies: trajectories, colours, fps and the timeline.
+
+        Descriptive metadata (show id, title, warnings) and the audio path are left out, so two
+        shows built from the same inputs hash the same.
+        """
+        timeline = {"fps": self.fps, "marks": [m.model_dump(mode="json") for m in self.marks]}
+        return arrays_hash({"positions": self.positions, "colors": self.colors}, timeline)
 
 
 # --- references -----------------------------------------------------------------------------

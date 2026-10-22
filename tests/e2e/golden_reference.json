@@ -1,0 +1,47 @@
+{
+  "frames": 4942,
+  "duration_s": 164.7,
+  "segments": [
+    [
+      "ground",
+      0,
+      0
+    ],
+    [
+      "takeoff",
+      1,
+      233
+    ],
+    [
+      "transition",
+      234,
+      1471
+    ],
+    [
+      "hold",
+      1472,
+      1921
+    ],
+    [
+      "transition",
+      1922,
+      2169
+    ],
+    [
+      "hold",
+      2170,
+      2769
+    ],
+    [
+      "transition",
+      2770,
+      4631
+    ],
+    [
+      "landing",
+      4632,
+      4941
+    ]
+  ],
+  "content_hash": "37147f5009bb63b4ef7d9375502302bd0be29440302ba642006e9d0564672bdf"
+}

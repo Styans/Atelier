@@ -103,11 +103,11 @@ def test_stale_after_changing_the_distributor(env: Path) -> None:
 
 
 def test_plugin_new_and_test(env: Path) -> None:
-    out = run("plugin", "new", "demo_distributor", "--namespace", "demo")
-    assert (env / "plugins" / "demo_distributor" / "atelier-plugin.toml").is_file(), out
+    out = run("plugin", "new", "cli_demo_distributor", "--namespace", "demo")
+    assert (env / "plugins" / "cli_demo_distributor" / "atelier-plugin.toml").is_file(), out
 
     listing = run("plugin", "list")
-    report = run("plugin", "test", "demo_distributor")
+    report = run("plugin", "test", "cli_demo_distributor")
 
     assert "demo.random" in listing
     assert "[inprocess]" in report and "[subprocess]" in report
