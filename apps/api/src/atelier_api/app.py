@@ -77,6 +77,8 @@ class NewScene(BaseModel):
     hold_s: float = Field(gt=0)
     title: str | None = None
     transition_s: float | None = None
+    offset_m: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    rotation_deg: tuple[float, float, float] = (0.0, 0.0, 0.0)
     tracks: list[AnimTrack] = Field(default_factory=list)
 
 
@@ -382,6 +384,8 @@ def create_app(
                 hold_s=body.hold_s,
                 title=body.title,
                 transition_s=body.transition_s,
+                offset_m=body.offset_m,
+                rotation_deg=body.rotation_deg,
                 tracks=body.tracks,
             )
             return view(store)

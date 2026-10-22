@@ -71,12 +71,9 @@ def test_the_phase_one_path_over_http(env: Env, fixture_files: dict[str, Path]) 
 
     ok(client.post(f"/api/shows/{sid}/scenes", json={"model_id": "m_torus", "hold_s": 4}), 201)
     spin = {"primitive": "builtin.rotate", "easing": "ease_in_out", "params": {"angle_deg": 60}}
-    ok(
-        client.post(
-            f"/api/shows/{sid}/scenes", json={"model_id": "m_star", "hold_s": 5, "tracks": [spin]}
-        ),
-        201,
-    )
+    star = {"model_id": "m_star", "hold_s": 5, "rotation_deg": [0, 0, 45], "tracks": [spin]}
+    added = ok(client.post(f"/api/shows/{sid}/scenes", json=star), 201)
+    assert added["show"]["program"][1]["rotation_deg"] == [0, 0, 45]
     compiled = run_job(client, worker, sid, "compile")
     assert compiled["result"]["frames"] > 0
 
