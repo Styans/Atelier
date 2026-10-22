@@ -1,0 +1,9 @@
+id = "blender_skybrush"
+name = "Blender + Skybrush Studio"
+version = "0.1.0"
+api_version = "1"
+roles = ["exporter"]
+runtime = "inprocess"
+entry = "atelier_blender_skybrush:plugin"
+requires_gpu = false
+description = "Builds a Skybrush Studio .blend in headless Blender"

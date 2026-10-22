@@ -1,0 +1,15 @@
+[project]
+name = "atelier-blender-skybrush"
+version = "0.1.0"
+description = "Atelier exporter: a Skybrush Studio .blend built in headless Blender"
+requires-python = ">=3.12"
+dependencies = [
+    "atelier-blender-bridge",
+    "atelier-plugin-sdk",
+    "numpy>=2.1",
+    "pydantic>=2.9",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.4,<0.14"]
+build-backend = "uv_build"

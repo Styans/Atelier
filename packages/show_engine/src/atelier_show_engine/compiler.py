@@ -339,6 +339,11 @@ class Compiler:
             fps=fps,
             marks=timeline.marks,
             audio=audio_info,
-            meta={"show_id": show.id, "title": show.brief.title, **report.as_meta()},
+            meta={
+                "show_id": show.id,
+                "title": show.brief.title,
+                "fleet": fleet.model_dump(mode="json"),
+                **report.as_meta(),
+            },
         )
         return compiled, report, expectation, inputs

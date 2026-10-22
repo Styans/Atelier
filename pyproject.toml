@@ -17,6 +17,7 @@ dependencies = [
     "atelier-builtin-validators",
     "atelier-builtin-exporters",
     "atelier-pointille",
+    "atelier-blender-skybrush",
 ]
 
 [dependency-groups]
@@ -47,6 +48,7 @@ atelier-builtin-transitions = { workspace = true }
 atelier-builtin-validators = { workspace = true }
 atelier-builtin-exporters = { workspace = true }
 atelier-pointille = { workspace = true }
+atelier-blender-skybrush = { workspace = true }
 
 # --- ruff -------------------------------------------------------------------
 
