@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field, Input, Select } from "@/components/ui/primitives";
 import { t } from "@/i18n/ru";
+import { notify } from "@/lib/feedback";
 
 import { useShowState } from "./context";
 
@@ -45,7 +46,7 @@ export function SceneEditor({ scene, onClose }: { scene: Scene | null; onClose: 
     const offsetV = parseVec(offset);
     const rotationV = parseVec(rotation);
     if (!offsetV || !rotationV) {
-      window.alert(`${t("scene.offset")} / ${t("scene.rotation")}: x, y, z`);
+      notify(t("scene.vectorHint"), "warning");
       return;
     }
     const holdS = Number(hold.replace(",", "."));

@@ -1,6 +1,7 @@
 import { Boxes, Clapperboard } from "lucide-react";
 
 import { useEvents } from "@/api/hooks";
+import { Feedback } from "@/components/Feedback";
 import { t } from "@/i18n/ru";
 import { cn } from "@/lib/utils";
 import { href, useRoute } from "@/lib/router";
@@ -37,6 +38,7 @@ export function App() {
         {route.page === "plugins" && <PluginsPage />}
         {route.page === "shows" && <ShowsPage />}
       </main>
+      <Feedback />
     </div>
   );
 }

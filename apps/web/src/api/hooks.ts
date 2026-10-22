@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 import { t } from "@/i18n/ru";
+import { notify } from "@/lib/feedback";
 
 import { ApiError, api } from "./client";
 import type { Job, Meta, ShowView } from "./types";
@@ -49,10 +50,10 @@ export function useEdit<A>(id: string, send: (args: A, base: number | undefined)
     },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        window.alert(t("error.conflict"));
+        notify(t("error.conflict"), "warning");
         invalidateShow(client, id);
       } else {
-        window.alert(`${t("error.generic")}: ${error instanceof Error ? error.message : String(error)}`);
+        notifyError(error);
       }
     },
   });
@@ -64,8 +65,13 @@ export function useRunJob(id: string) {
     mutationFn: (job: { kind: string; args?: Record<string, unknown> }) =>
       api.post<Job>(`/api/shows/${id}/jobs`, { kind: job.kind, args: job.args ?? {} }),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.show(id) }),
-    onError: (error) => window.alert(`${t("error.generic")}: ${error instanceof Error ? error.message : error}`),
+    onError: notifyError,
   });
+}
+
+/** A failed request as a notice: "Ошибка: <the server's readable message>". */
+export function notifyError(error: unknown) {
+  notify(`${t("error.generic")}: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 /** Live updates (SSE): job progress patches the cache; a finished job reloads its show. */

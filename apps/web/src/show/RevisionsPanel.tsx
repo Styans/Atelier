@@ -8,6 +8,7 @@ import type { DiffEntry, RevisionInfo } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/primitives";
 import { t } from "@/i18n/ru";
+import { confirmAction } from "@/lib/feedback";
 import { cn } from "@/lib/utils";
 
 import { useShowState } from "./context";
@@ -54,7 +55,14 @@ export function RevisionsPanel() {
                 size="sm"
                 variant="outline"
                 disabled={selected === view.show.revision}
-                onClick={() => window.confirm(t("revisions.rollback.confirm", { n: selected })) && rollback.mutate(selected)}
+                onClick={async () => {
+                  const ok = await confirmAction({
+                    title: t("revisions.rollback.title", { n: selected }),
+                    message: t("revisions.rollback.confirm", { n: selected }),
+                    confirmLabel: t("revisions.rollback"),
+                  });
+                  if (ok) rollback.mutate(selected);
+                }}
               >
                 <RotateCcw className="h-3.5 w-3.5" /> {t("revisions.rollback")}
               </Button>

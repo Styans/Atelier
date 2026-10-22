@@ -3,7 +3,7 @@ import { Cpu, HeartPulse, Power } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "@/api/client";
-import { keys } from "@/api/hooks";
+import { keys, notifyError } from "@/api/hooks";
 import type { PluginInfo } from "@/api/types";
 import { SchemaForm } from "@/components/SchemaForm";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,7 @@ function PluginCard({ plugin }: { plugin: PluginInfo }) {
   const action = useMutation({
     mutationFn: (name: "enable" | "disable" | "health") => api.post<PluginInfo>(`/api/plugins/${plugin.id}/${name}`),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.plugins }),
-    onError: (error) => window.alert(error instanceof Error ? error.message : String(error)),
+    onError: notifyError,
   });
   const disabled = plugin.status === "disabled";
   return (

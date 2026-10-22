@@ -3,7 +3,7 @@ import { Plus } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "@/api/client";
-import { keys, useMeta } from "@/api/hooks";
+import { keys, notifyError, useMeta } from "@/api/hooks";
 import type { ShowSummary, ShowView } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
@@ -59,7 +59,7 @@ function NewShowDialog() {
       setOpen(false);
       window.location.hash = href({ page: "show", id: view.show.id });
     },
-    onError: (error) => window.alert(error instanceof Error ? error.message : String(error)),
+    onError: notifyError,
   });
   return (
     <Dialog open={open} onOpenChange={setOpen}>

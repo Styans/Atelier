@@ -8,6 +8,7 @@ import type { CompiledSummary, Scene, ValidationReport } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/primitives";
 import { t } from "@/i18n/ru";
+import { confirmAction } from "@/lib/feedback";
 import { cn, formatSeconds } from "@/lib/utils";
 
 import { useShowState } from "./context";
@@ -62,7 +63,9 @@ export function Timeline() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-sm">
-          {t("timeline.total")}: <b>{formatSeconds(total)}</b> · {t("timeline.budget")} {formatSeconds(budget)}
+          {t("timeline.total")}: <b className={cn(total > budget && "text-warning")}>{formatSeconds(total)}</b> · {t("timeline.budget")}{" "}
+          {formatSeconds(budget)}
+          {total > budget && <span className="text-warning"> ({t("timeline.overBudget", { time: formatSeconds(total - budget) })})</span>}
           {music !== null && ` · ${t("timeline.music")} ${formatSeconds(music)}`}
           <span className="ml-2 text-xs text-muted-foreground">{fresh && compiled.data ? t("timeline.compiled") : t("timeline.planned")}</span>
         </div>
@@ -114,6 +117,12 @@ export function Timeline() {
             <Badge tone="primary">
               {t("timeline.hold")} {scene.hold_s} с
             </Badge>
+            {scene.rotation_deg.some((v) => v !== 0) && (
+              <Badge title={t("scene.rotation")}>↻ {scene.rotation_deg.join(", ")}°</Badge>
+            )}
+            {scene.offset_m.some((v) => v !== 0) && (
+              <Badge title={t("scene.offset")}>⇄ {scene.offset_m.join(", ")} м</Badge>
+            )}
             {(scene.animation?.tracks.length ?? 0) > 0 && <Badge>{scene.animation!.tracks.map((tr) => tr.primitive).join(", ")}</Badge>}
             <Button size="icon" variant="ghost" title={t("scene.up")} disabled={index === 0} onClick={() => move(index, -1)}>
               <ArrowUp className="h-4 w-4" />
@@ -124,7 +133,15 @@ export function Timeline() {
             <Button size="icon" variant="ghost" title={t("common.edit")} onClick={() => setEditing(scene)}>
               <Pencil className="h-4 w-4" />
             </Button>
-            <Button size="icon" variant="ghost" title={t("common.delete")} onClick={() => window.confirm(`${t("common.delete")} ${scene.title}?`) && remove.mutate(scene.id)}>
+            <Button size="icon" variant="ghost" title={t("common.delete")} onClick={async () => {
+                const ok = await confirmAction({
+                  title: t("scene.delete.title", { title: scene.title }),
+                  message: t("scene.delete.confirm"),
+                  confirmLabel: t("common.delete"),
+                  destructive: true,
+                });
+                if (ok) remove.mutate(scene.id);
+              }}>
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>

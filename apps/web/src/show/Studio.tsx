@@ -8,6 +8,7 @@ import type { ExportInfo, ValidationReport } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, CardContent, CardHeader, CardTitle } from "@/components/ui/primitives";
 import { type MessageKey, plural, t, tOr } from "@/i18n/ru";
+import { confirmAction } from "@/lib/feedback";
 import { formatSeconds } from "@/lib/utils";
 
 import { useShowState } from "./context";
@@ -137,7 +138,15 @@ export function Studio() {
           size="sm"
           variant="secondary"
           disabled={running || compiledState !== null}
-          onClick={() => window.confirm(t("stage.export.confirm")) && runJob.mutate({ kind: "export" })}
+          onClick={async () => {
+            const exporters = show.pipeline.exporters.map((e) => e.component).join(", ");
+            const ok = await confirmAction({
+              title: t("stage.export.title"),
+              message: t("stage.export.confirm", { exporters }),
+              confirmLabel: t("stage.export.go"),
+            });
+            if (ok) runJob.mutate({ kind: "export" });
+          }}
         >
           <Download className="h-3.5 w-3.5" /> {t("stage.export.run")}
         </Button>
