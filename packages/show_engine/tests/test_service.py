@@ -90,7 +90,7 @@ def test_changing_point_params_makes_the_chain_stale(
     service.set_stage(store, "point_distributor", "pointille", {"relax_iterations": 5})
 
     report = service.stale_report(store)
-    assert "parameters changed" in (report["models.m_torus.points.36"] or "")
+    assert report["models.m_torus.points.36"] == "parameters changed: relax_iterations: 20 -> 5"
     assert "stale" in (report["compiled"] or "")
     assert "stale" in (report["validation"] or "")
     assert report["models.m_torus.mesh"] is None

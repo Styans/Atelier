@@ -29,6 +29,32 @@ from atelier_plugin_host import ComponentHandle, ComponentNotFound, PluginRegist
 from atelier_plugin_sdk import API_VERSION, PluginError
 from atelier_plugin_sdk.roles import RoleName
 
+MAX_CHANGES = 4
+_MISSING = object()
+# Wrappers the expectations put around a component's own parameters; the reader knows them
+# as plain parameter names ("relax_iterations", not "component.relax_iterations").
+_WRAPPERS = ("component",)
+
+
+def _short(value: Any) -> str:
+    if value is _MISSING:
+        return "none"
+    text = canonical_json(value)
+    return text if len(text) <= 40 else f"{text[:37]}..."
+
+
+def param_changes(old: Any, new: Any, path: str = "") -> list[str]:
+    """``"relax_iterations: 20 -> 40"`` for every leaf that differs, in key order."""
+    if isinstance(old, dict) and isinstance(new, dict):
+        changes = []
+        for key in sorted(old.keys() | new.keys()):
+            inner = key if not path or path in _WRAPPERS else f"{path}.{key}"
+            changes += param_changes(old.get(key, _MISSING), new.get(key, _MISSING), inner)
+        return changes
+    if old == new:
+        return []
+    return [f"{path or 'parameters'}: {_short(old)} -> {_short(new)}"]
+
 
 def core_producer(component: str, role: str, version: str) -> Producer:
     """Producer of artifacts made by the core; bump ``version`` when the output changes."""
@@ -354,12 +380,9 @@ class Provenance:
                 f"{exp.producer.plugin_version}"
             )
         if record.params != exp.params:
-            changed = sorted(
-                k
-                for k in record.params.keys() | exp.params.keys()
-                if record.params.get(k) != exp.params.get(k)
-            )
-            return f"parameters changed: {', '.join(changed)}"
+            changed = param_changes(record.params, exp.params)
+            more = f" and {len(changed) - MAX_CHANGES} more" if len(changed) > MAX_CHANGES else ""
+            return f"parameters changed: {'; '.join(changed[:MAX_CHANGES])}{more}"
         if record.seed != exp.seed:
             return "seed changed"
         for input_slot in exp.inputs:
