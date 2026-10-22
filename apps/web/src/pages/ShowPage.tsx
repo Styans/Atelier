@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 
 import { useShow } from "@/api/hooks";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -10,7 +10,10 @@ import { PipelinePanel } from "@/show/PipelinePanel";
 import { RevisionsPanel } from "@/show/RevisionsPanel";
 import { Studio } from "@/show/Studio";
 import { Timeline } from "@/show/Timeline";
-import { Viewer } from "@/show/Viewer";
+
+// three.js and the viewer are most of the bundle: the list of shows and the plugins screen
+// load without them, the 3D view fetches them on first use.
+const Viewer = lazy(() => import("@/show/Viewer").then((module) => ({ default: module.Viewer })));
 
 export function ShowPage({ id }: { id: string }) {
   const show = useShow(id);
@@ -46,7 +49,9 @@ export function ShowPage({ id }: { id: string }) {
               <TabsTrigger value="chat">{t("show.tab.chat")}</TabsTrigger>
             </TabsList>
             <TabsContent value="viewer" className="flex flex-col">
-              <Viewer />
+              <Suspense fallback={<p className="p-6 text-muted-foreground">{t("common.loading")}</p>}>
+                <Viewer />
+              </Suspense>
             </TabsContent>
             <TabsContent value="timeline" className="overflow-y-auto p-3">
               <Timeline />
