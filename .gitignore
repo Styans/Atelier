@@ -19,6 +19,7 @@ projects/
 
 # Frontend (phase 2)
 node_modules/
+*.tsbuildinfo
 
 # OS / editors
 .DS_Store
@@ -29,5 +30,5 @@ Thumbs.db
 # Generated test inputs (tests/fixtures/make_fixtures.py)
 tests/fixtures/generated/
 
-# uv-managed Python for this repo (see pyproject [tool.uv])
+# uv-managed Python for this repo (UV_PYTHON_INSTALL_DIR=.python, ADR-031)
 .python/
