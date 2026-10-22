@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -355,7 +356,7 @@ def points(
 def generate_images(
     model: str,
     prompt: Annotated[str, typer.Option(help="What to draw")],
-    n: Annotated[int, typer.Option(help="How many concepts")] = 4,
+    n: Annotated[int, typer.Option("--n", "-n", help="How many concepts")] = 4,
     show: ShowOption = None,
 ) -> None:
     """Concept images for a model with the pipeline's image_generator (GPU)."""
@@ -381,6 +382,57 @@ def generate_mesh(
             open_show(svc, show), model, concept, on_progress=progress_printer()
         )
         console.print(f"{record.slot} by {record.producer.component} -> {record.path}")
+
+
+@app.command()
+def ui(
+    port: Annotated[int, typer.Option(help="Port of the web UI and API")] = 8710,
+    no_browser: Annotated[bool, typer.Option("--no-browser", help="Do not open a browser")] = False,
+    no_worker: Annotated[
+        bool, typer.Option("--no-worker", help="Do not start a worker (one runs elsewhere)")
+    ] = False,
+) -> None:
+    """Start the web UI: the API on 127.0.0.1 and a worker process for the jobs."""
+    import threading
+    import webbrowser
+
+    import uvicorn
+
+    from atelier_api.app import create_app
+    from atelier_plugin_host.runners import kill_process_tree
+
+    config = load_config()
+    dist = Path(__file__).resolve().parents[3] / "web" / "dist"
+    if not (dist / "index.html").is_file():
+        console.print(
+            "[yellow]the web UI is not built:[/yellow] npm --prefix apps/web install && "
+            "npm --prefix apps/web run build  (the API works without it)"
+        )
+    worker_proc = None
+    if not no_worker:
+        log_path = config.cache_dir / "logs" / "worker.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+        with log_path.open("a", encoding="utf-8") as log_file:
+            worker_proc = subprocess.Popen(
+                [sys.executable, "-m", "atelier_worker.worker"],
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                cwd=config.root,
+                creationflags=flags,
+            )
+        console.print(f"worker started (pid {worker_proc.pid}), log: {log_path}")
+    url = f"http://127.0.0.1:{port}/"
+    if not no_browser:
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    console.print(f"Atelier UI: {url}  (Ctrl+C to stop)")
+    try:
+        uvicorn.run(
+            create_app(config, web_dist=dist), host="127.0.0.1", port=port, log_level="warning"
+        )
+    finally:
+        if worker_proc is not None:
+            kill_process_tree(worker_proc)  # type: ignore[arg-type]
 
 
 @app.command()

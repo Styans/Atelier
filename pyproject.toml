@@ -86,7 +86,7 @@ known-first-party = ["atelier_*"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["packages/*/src", "apps/*/src", "plugins/*/src", "tests"]
+files = ["packages/*/src", "apps/cli/src", "apps/worker/src", "apps/api/src", "plugins/*/src", "tests"]
 exclude = ['packages/blender_bridge/src/atelier_blender_bridge/scripts/']
 explicit_package_bases = true
 plugins = ["pydantic.mypy"]
