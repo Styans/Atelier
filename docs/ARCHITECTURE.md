@@ -1,26 +1,29 @@
 # Архитектура Atelier
 
-Статус: фаза 1 (сквозной путь без UI и LLM) реализована. Разделы с пометкой «(фаза N)» — согласованный
-дизайн, ещё не реализованный. Решения и обоснования — `docs/DECISIONS.md`; требования — `docs/SPEC.md`.
+Статус: фазы 1 (сквозной путь) и 2 (API, очередь, worker, веб-UI, Pygmalion) реализованы. Разделы с
+пометкой «(фаза N)» для N ≥ 3 — согласованный дизайн, ещё не реализованный. Решения и обоснования — `docs/DECISIONS.md`; требования — `docs/SPEC.md`.
 
 ## Схема
 
 ```mermaid
 flowchart LR
-  UI[Web UI<br/>React + three.js<br/>фаза 2] <-->|REST + SSE| API[FastAPI<br/>фаза 2]
+  UI[Web UI<br/>React + three.js] <-->|REST + SSE| API[apps/api<br/>FastAPI]
   CLI[apps/cli<br/>atelier ...] --> SVC
-  API --> SVC[show_engine.ShowService]
+  API -->|дешёвые правки| SVC[show_engine.ShowService]
+  API -->|дорогие действия| DB[(.atelier/atelier.db<br/>jobs, shows)]
+  WRK[apps/worker] -->|забирает по одной| DB
+  WRK --> SVC
   API --> LLM[Assistant<br/>Claude API, tool use<br/>фаза 3]
   SVC --> ENG[compiler, provenance,<br/>store]
   ENG --> HOST[plugin_host<br/>registry, runners]
   HOST -->|inprocess| PIN[plugins: pointille,<br/>builtin_*, blender_skybrush]
-  HOST -->|JSON-RPC stdio| PSUB[subprocess plugins<br/>pygmalion в своём venv, фаза 2]
+  HOST -->|JSON-RPC stdio| PSUB[subprocess plugins<br/>pygmalion в своём venv]
   PIN --> BB[blender_bridge]
   BB --> BL[blender -b<br/>+ Skybrush Studio]
   ENG --> STORE[(projects/&lt;id&gt;/<br/>show.json, revisions,<br/>artifacts)]
 ```
 
-`ShowService` — единая точка входа для всех действий; CLI сейчас, API в фазе 2 вызывают одни и те же методы.
+`ShowService` — единая точка входа для всех действий; CLI, API и worker вызывают одни и те же методы.
 
 ## Пакеты и слои
 
@@ -31,7 +34,11 @@ flowchart LR
 | `packages/plugin_host` | `atelier_plugin_host` | discovery, реестр, health-check, inprocess/subprocess раннеры, кэш компонентов, union-схемы | domain, plugin_sdk |
 | `packages/show_engine` | `atelier_show_engine` | config, store (ревизии), provenance (stale), importing, geometry, compiler, `ShowService` | domain, plugin_sdk, plugin_host |
 | `packages/blender_bridge` | `atelier_blender_bridge` | `run_blender`, прореживание ключей, скрипты `build_show.py`, `inspect_show.py`, `probe_skybrush.py` | domain |
-| `apps/cli` | `atelier_cli` | команда `atelier` | всё ядро |
+| `packages/jobs` | `atelier_jobs` | SQLite (SQLModel): `jobs`, индекс `shows`, `JobQueue` | show_engine |
+| `apps/worker` | `atelier_worker` | процесс, исполняющий задачи очереди | ядро, jobs |
+| `apps/api` | `atelier_api` | FastAPI: REST, SSE, бинарные кадры, статика UI | ядро, jobs |
+| `apps/cli` | `atelier_cli` | команда `atelier` (в т.ч. `atelier ui`) | всё ядро, jobs, worker, api |
+| `apps/web` | — | веб-UI (React, TypeScript), сборка в `apps/web/dist` | только HTTP API |
 | `plugins/*` | свои | реализации ролей | domain, plugin_sdk, blender_bridge |
 
 Правила проверяет `tests/test_architecture.py` (AST).
@@ -55,6 +62,8 @@ projects/<show_id>/
   models/<model_id>/mesh_<fp8>.npz  points_<N>_<fp8>.npz
   compiled/trajectories_<fp8>.npz validation_<fp8>.json
   exports/<component>_<fp8>/      # builtin_csv_*/skybrush_csv.zip, blender_skybrush_blend_*/show.blend
+  models/<model_id>/concepts_<fp8>/  # концепт-картинки; сгенерированный GLB импортируется в mesh_<fp8>.npz
+  logs/jobs/<job_id>.log          # лог каждой задачи worker
   .work/                          # временные файлы шага; удаляются после успешного шага
   .lock                           # пока идёт запись
 ```
@@ -95,7 +104,9 @@ roles = ["validator_rule"]
 runtime = "inprocess"             # inprocess | subprocess
 entry = "atelier_builtin_validators:plugin"
 command = []                      # subprocess; плейсхолдеры {python} {uv} {entry} {plugin_dir} {src}
+                                  # и {setting:<key>} из [plugin_settings.<id>] в atelier.toml
 requires_gpu = false
+settings = {}                     # ключи настроек с описаниями, для экрана «Плагины»
 ```
 Компоненты и их схемы хост получает при загрузке (import или RPC `initialize`); для subprocess-плагинов
 кэширует в `.atelier/plugins.json` по (id, version), чтобы список не поднимал процессы.
@@ -173,8 +184,29 @@ requires_gpu = false
   пороги safety из флота, звук, сохранение и сверка выборки кадров.
 - `inspect_show.py`: открывает готовый `.blend` в отдельном процессе и отдаёт то, что видит Skybrush.
 
-## CLI (фаза 1)
-`atelier new | list | use`, `fleet presets | use | set`, `music set`, `add-model --glb`, `points`,
-`scene add | list`, `pipeline show | set | validators | exporters`, `status`, `compile`, `validate`,
-`export`, `history`, `rollback`, `doctor`, `plugin list | new | test`. Текущее шоу: `--show`,
+## Сервер, очередь и UI (фаза 2)
+- **`atelier ui`** поднимает API на `127.0.0.1:8710` (без авторизации, только локально), отдаёт
+  `apps/web/dist` и запускает рядом процесс worker (лог `.atelier/logs/worker.log`, при выходе
+  убивается с деревом). `atelier worker` — worker отдельно.
+- **Человек в контуре.** Дешёвые правки (бриф, флот, модели, сцены, pipeline, утверждение этапа,
+  откат) API делает сразу через `ShowService` — новая ревизия с автором `ui`. Точки, компиляция,
+  проверка, экспорт и генерация — только задачи очереди по явной кнопке; экспорт — с подтверждением.
+- **API** (`/api`): шоу и правки (`base_revision`, 409 при конфликте), загрузки GLB/музыки, модели,
+  сцены, pipeline, задачи (`POST …/jobs`, отмена, лог), результаты (`compiled`, `compiled/frames`,
+  `validation`, `exports`, файлы проекта для скачивания), ревизии и diff, плагины (вкл/выкл, health,
+  компоненты и схемы ролей), `events` (SSE). Ошибки сервиса — 400/404 с понятным текстом.
+- **Очередь** (ADR-022…024): SQLite, атомарный забор задачи, прогресс и отмена через БД, события SSE
+  опросом БД раз в 300 мс.
+- **UI** (ADR-029): список шоу; экран шоу — «Материалы» (бриф, флот, модели, музыка), рабочая
+  область (3D: модель / точки с тепловой картой дистанций / проигрывание шоу; таймлайн с бюджетом,
+  музыкой и маркерами нарушений; pipeline с формами из схем; ревизии с diff и откатом; чат — фаза 3),
+  «Студия» (этапы, статусы, stale с причиной, действия) и панель задач; экран «Плагины».
+- **Координаты во вьюере:** группа сцены повёрнута на −90° по X, show (x, y, z) → three (x, z, −y);
+  зритель (−Y) стоит перед камерой.
+
+## CLI
+`atelier new | list | use`, `fleet presets | use | set`, `music set`, `add-model [--glb]` (без `--glb`
+— пустая карточка под генерацию), `points`, `scene add | list`, `pipeline show | set | validators |
+exporters`, `status`, `compile`, `validate`, `export`, `history`, `rollback`, `doctor`,
+`plugin list | new | test`, `generate images | mesh`, `ui`, `worker`. Текущее шоу: `--show`,
 `ATELIER_SHOW`, папка с `show.json` или последнее использованное (`.atelier/current_show`).

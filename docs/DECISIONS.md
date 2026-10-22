@@ -115,10 +115,10 @@ path-source из исходной версии ADR: рабочую копию п
 Pointille входит в версию компонента (обновление делает точки stale). Адаптер хранит V/F меша;
 `evaluate` — в SDK.
 
-## ADR-014. Pygmalion — subprocess-плагин поверх `JobManager` — Принято (2026-10-21), фаза 2
+## ADR-014. Pygmalion — subprocess-плагин поверх `JobManager` — Принято (2026-10-21), реализовано в фазе 2
 **Решение.** Не HTTP-сервер, а stdio-shim на `atelier_plugin_sdk.serve` в venv Pygmalion
 (`runtime\venv`), использующий `JobManager` как библиотеку. Облачный провайдер — интерфейс-
-заглушка; сравнение сервисов — перед фазой 4.
+заглушка; сравнение сервисов — перед фазой 4. Подробности запуска — ADR-026, ADR-032.
 
 ## ADR-015. Зависимости и инструменты — Принято (2026-10-21)
 - `typer` — CLI (фаза 0).
@@ -167,3 +167,85 @@ Douglas–Peucker по каждой траектории (допуск 2 см и
 ## ADR-021. Фигура использует весь флот — Принято (2026-10-22), временно
 `ModelCard.drone_count` меньше флота пока не поддерживается (компилятор отвечает понятной ошибкой):
 нужны правила для простаивающих дронов (где висят, погашены ли). Обсудить до фазы 5.
+
+## ADR-022. SQLite через SQLModel: индекс шоу и очередь задач — Принято (2026-10-22)
+Файл `.atelier/atelier.db`. Таблица `shows` — индекс (id, title, path, revision, updated_at),
+обновляется слушателем `COMMIT_LISTENERS` после каждого commit; источник правды остаётся `show.json`.
+Таблица `jobs` — id, show_id, kind, args, status (`queued/running/done/failed/cancelled`), progress,
+message, cancel_requested, worker_pid, время, result, error, log_path. История чата — фаза 3.
+Код — новый пакет `packages/jobs` (`atelier_jobs`), общий для API и worker (ADR-030).
+
+## ADR-023. Очередь и worker — Принято (2026-10-22)
+Один процесс `atelier_worker` забирает задачи по одной: `UPDATE … WHERE status='queued' … RETURNING`
+(атомарно, без брокера). Прогресс пишется не чаще 4 раз в секунду. Отмена — флаг `cancel_requested`:
+прогресс-колбэк бросает `Cancelled`, subprocess-плагину хост шлёт `atelier.cancel`. При старте worker
+помечает `running`-задачи с мёртвым pid как `failed`; падение worker не роняет API. Лог задачи —
+`projects/<id>/logs/jobs/<job>.log`. Виды задач: `points`, `compile`, `validate`, `export`,
+`generate_images`, `generate_mesh`; одна GPU-задача за раз гарантирует единственный worker.
+
+## ADR-024. SSE без брокера — Принято (2026-10-22)
+`GET /api/events` раз в 300 мс читает изменения `jobs` и `shows` по `updated_at` и шлёт события
+`job` и `show`; UI по ним перечитывает данные. Redis не нужен (SPEC §4.1), задержка до 0,3 с приемлема.
+
+## ADR-025. Конкурентные правки: `base_revision` → 409 — Принято (2026-10-22)
+Каждая правка шоу из UI несёт `base_revision`; если `show.json` изменился, `ConflictError` → HTTP 409,
+UI перечитывает шоу и пишет «изменено в другом месте». Автор ревизии — `ui`, `worker` или `cli`.
+
+## ADR-026. Настройки плагинов — Принято (2026-10-22)
+- `atelier.toml`: `[plugin_settings.<id>]` (строки). Манифест объявляет ключи в `settings = {key =
+  "описание"}` — их показывает экран «Плагины».
+- Хост подставляет `{setting:key}` в `command` манифеста и передаёт процессу env
+  `ATELIER_PLUGIN_SETTINGS` (JSON) и `ATELIER_SDK_PATHS` (где лежат `atelier_plugin_sdk` и
+  `atelier_domain`): плагин в чужом venv импортирует SDK, ничего туда не ставя.
+- Вкл/выкл из UI хранится в `.atelier/ui_settings.json` и объединяется с `plugins.disabled` из toml.
+
+## ADR-027. Меш может быть файлом GLB — Принято (2026-10-22)
+`MeshRef` может указывать на `.glb`/`.obj` (`MeshRef.is_mesh_data` различает); ядро импортирует такой
+файл тем же `load_mesh_file`, что и загрузку пользователя (Y-up → Z-up). Provenance хранит, кто, с
+какими параметрами и из какого концепта сделал меш. Сгенерированный меш — выбор пользователя, как
+импортированный: смена настроек генератора не делает его stale, перегенерация только явная.
+
+## ADR-028. Проигрывание в браузере: бинарные кадры — Принято (2026-10-22)
+`GET …/compiled/frames?fps=10` отдаёт `uint32` длину заголовка + JSON-заголовок + массивы
+(выравнивание 4 байта): positions float32, colors uint8, прорежено по времени; клиент интерполирует.
+Тот же формат — у точек модели (`…/models/{mid}/points`, с расстоянием до соседа для тепловой карты).
+150 дронов × 165 с при 10 fps — около 3 MB.
+
+## ADR-029. Стек фронтенда — Принято (2026-10-22)
+React 18 + Vite 5 + TypeScript + Tailwind 3; компоненты в стиле shadcn/ui копируются в репо поверх
+Radix (dialog, tabs, slot); @react-three/fiber + drei (three 0.169); TanStack Query; vitest, eslint.
+Пакетный менеджер — npm (Node 24 уже стоит). Версии в `package.json` закреплены точно. Формы из JSON
+Schema — свой `SchemaForm` под то, что даёт pydantic (number/integer с min/max, boolean, string, enum,
+`anyOf null`, кортежи), без rjsf. Строки — `apps/web/src/i18n/ru.ts` (с формами множественного числа).
+Сборка `apps/web/dist` не коммитится; `atelier ui` отдаёт её как статику.
+
+## ADR-030. Пакеты фазы 2 и слои — Принято (2026-10-22)
+`packages/jobs` (`atelier_jobs`: модели SQLModel, `JobQueue`), `apps/worker` (`atelier_worker`),
+`apps/api` (`atelier_api`). Это уровень `apps`: ядро (`domain … show_engine`) их не импортирует,
+`tests/test_architecture.py` это проверяет. Новые зависимости (к ADR-015): `fastapi`, `uvicorn`
+(API), `python-multipart` (загрузки GLB и музыки), `sqlmodel` (ADR-022); `httpx` — только dev, для
+`TestClient`.
+
+## ADR-031. Python проекта лежит в репозитории — Принято (2026-10-22)
+Среда разработки (MSIX-приложение) виртуализирует AppData, и venv Atelier оказался на Python из
+`runtime\test` Pygmalion. uv не разрешает `python-install-dir` ни в `pyproject.toml`, ни в `uv.toml`
+проекта, поэтому CPython 3.12 ставится в `.python/` репозитория (`UV_PYTHON_INSTALL_DIR=.python uv
+python install 3.12`, папка в `.gitignore`), и `.venv` создан от него. На другой машине достаточно
+обычного `uv sync`.
+
+## ADR-032. Плагин Pygmalion — Принято (2026-10-22)
+- Плагин вне uv workspace, запускается Python'ом Pygmalion: `command = ["{setting:python}",
+  "{plugin_dir}/bootstrap.py", "--entry", "{entry}"]`. `bootstrap.py` ставит в начало `sys.path` пути
+  SDK, исходники `server_dir` (свежее, чем установленная в venv копия `dronegen_server`) и `src`
+  плагина, настраивает logging в stderr (→ `.atelier/logs/pygmalion.log`). В venv Pygmalion ничего
+  не ставится; коммит самого Pygmalion — на авторе.
+- `pygmalion.images` (`zimage_turbo|sdxl|mock`): n картинок — n задач Pygmalion с `seed+i` (параметра
+  `n` у Pygmalion нет). `pygmalion.mesh` (`hunyuan|triposr|silhouette|mock`): явный seed (у Hunyuan
+  по умолчанию 1). После вызова модели выгружаются (`keep_loaded=false`), OOM → `ResourceExhausted` с
+  подсказкой. Health перечисляет доступные бэкенды.
+- Первый старт процесса — до 15 мин (`startup_timeout_s=900`), таймаут вызова — 1 ч.
+
+## ADR-033. Уточнения контракта по итогам фазы 2 — Принято (2026-10-22)
+Без смены `api_version` (контракт не выпускался): поле манифеста `settings`; `MeshRef` на файл меша
+(ADR-027); роли `image_generator`/`mesh_generator` в `PipelineConfig` необязательны (`None` — этап не
+настроен); `__version__` пакетов SDK и domain при импорте из исходников — `0.0.0+source`.
