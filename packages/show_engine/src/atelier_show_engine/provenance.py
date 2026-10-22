@@ -310,10 +310,7 @@ class Provenance:
     def _export(self, component_id: str, slot: str) -> Expectation:
         handle, params = self.stage("exporter", self.exporter_config(component_id))
         return Expectation(
-            producer=producer_for(handle),
-            params=params,
-            seed=derive_seed(self.show.seed, slot),
-            inputs=["compiled"],
+            producer=producer_for(handle), params=params, seed=None, inputs=["compiled"]
         )
 
     # --- fingerprints and staleness ---
