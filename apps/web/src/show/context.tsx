@@ -3,7 +3,7 @@ import { createContext, useContext } from "react";
 import type { ShowView } from "@/api/types";
 
 export type ViewerMode = "model" | "points" | "show";
-export type WorkspaceTab = "viewer" | "timeline" | "pipeline" | "revisions" | "chat";
+export type WorkspaceTab = "viewer" | "timeline" | "pipeline" | "revisions";
 
 export interface ShowState {
   id: string;

@@ -126,10 +126,52 @@ export interface Show {
 
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
+export type ChatBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error: boolean };
+
+export interface ChatMessage {
+  id: number;
+  show_id: string;
+  seq: number;
+  role: "user" | "assistant" | "notice";
+  content: ChatBlock[];
+  turn_job_id: string | null;
+  revision_before: number | null;
+  revision_after: number | null;
+  created_at: number;
+}
+
+export interface Proposal {
+  id: string;
+  show_id: string;
+  action: string;
+  args: Record<string, unknown>;
+  summary: string;
+  status: "pending" | "applied" | "dismissed";
+  created_at: number;
+}
+
+export interface ChatState {
+  messages: ChatMessage[];
+  proposals: Proposal[];
+  active_turn: Job | null;
+}
+
+export interface ChatEvent {
+  id: number;
+  turn_job_id: string;
+  seq: number;
+  kind: "text" | "tool_start" | "tool_result" | "status" | "done" | "error";
+  payload: Record<string, unknown>;
+}
+
 export interface Job {
   id: string;
   show_id: string;
   kind: string;
+  priority?: number;
   args: Record<string, unknown>;
   status: JobStatus;
   progress: number;

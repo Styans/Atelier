@@ -1,6 +1,7 @@
-import { Suspense, lazy, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, Suspense, lazy, useState } from "react";
 
 import { useShow } from "@/api/hooks";
+import { ChatPanel } from "@/chat/ChatPanel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { t } from "@/i18n/ru";
 import { ShowContext, type ShowState, type WorkspaceTab } from "@/show/context";
@@ -15,10 +16,45 @@ import { Timeline } from "@/show/Timeline";
 // load without them, the 3D view fetches them on first use.
 const Viewer = lazy(() => import("@/show/Viewer").then((module) => ({ default: module.Viewer })));
 
+const CHAT_WIDTH_KEY = "atelier.chatWidth";
+const CHAT_MIN = 280;
+const CHAT_MAX = 720;
+
+function storedChatWidth(): number {
+  try {
+    const value = Number(window.localStorage.getItem(CHAT_WIDTH_KEY));
+    return value >= CHAT_MIN && value <= CHAT_MAX ? value : 380;
+  } catch {
+    return 380; // storage blocked (private window): the default is fine
+  }
+}
+
 export function ShowPage({ id }: { id: string }) {
   const show = useShow(id);
   const [viewer, setViewerState] = useState<ShowState["viewer"]>({ mode: "show", modelId: null, seek: null });
   const [tab, setTab] = useState<WorkspaceTab>("viewer");
+  const [chatWidth, setChatWidth] = useState(storedChatWidth);
+
+  const startResize = (down: ReactPointerEvent) => {
+    const startX = down.clientX;
+    const startWidth = chatWidth;
+    let width = startWidth;
+    const move = (e: PointerEvent) => {
+      width = Math.min(CHAT_MAX, Math.max(CHAT_MIN, startWidth + e.clientX - startX));
+      setChatWidth(width);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      try {
+        window.localStorage.setItem(CHAT_WIDTH_KEY, String(width));
+      } catch {
+        // not remembered: fine
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   if (show.isLoading) return <p className="p-6 text-muted-foreground">{t("common.loading")}</p>;
   if (show.error || !show.data) return <p className="p-6 text-destructive">{String(show.error)}</p>;
@@ -34,11 +70,25 @@ export function ShowPage({ id }: { id: string }) {
 
   return (
     <ShowContext.Provider value={state}>
-      <div className="grid h-full grid-cols-[300px_minmax(0,1fr)_300px] grid-rows-[minmax(0,1fr)_auto]">
+      <div
+        className="grid h-full grid-rows-[minmax(0,1fr)_auto]"
+        style={{ gridTemplateColumns: `300px ${chatWidth}px minmax(0,1fr) 300px` }}
+      >
         <aside className="row-span-2 overflow-y-auto border-r p-3">
           <h2 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">{t("show.materials")}</h2>
           <Materials />
         </aside>
+        <section className="relative row-span-2 flex min-h-0 flex-col border-r">
+          <h2 className="px-3 pt-3 text-xs font-semibold uppercase text-muted-foreground">{t("show.chat")}</h2>
+          <div className="min-h-0 flex-1">
+            <ChatPanel />
+          </div>
+          <div
+            className="absolute inset-y-0 -right-1 w-2 cursor-col-resize hover:bg-primary/30"
+            title={t("show.chat.resize")}
+            onPointerDown={startResize}
+          />
+        </section>
         <section className="flex min-h-0 flex-col">
           <Tabs value={tab} onValueChange={(v) => setTab(v as WorkspaceTab)} className="flex min-h-0 flex-1 flex-col">
             <TabsList>
@@ -46,7 +96,6 @@ export function ShowPage({ id }: { id: string }) {
               <TabsTrigger value="timeline">{t("show.tab.timeline")}</TabsTrigger>
               <TabsTrigger value="pipeline">{t("show.tab.pipeline")}</TabsTrigger>
               <TabsTrigger value="revisions">{t("show.tab.revisions")}</TabsTrigger>
-              <TabsTrigger value="chat">{t("show.tab.chat")}</TabsTrigger>
             </TabsList>
             <TabsContent value="viewer" className="flex flex-col">
               <Suspense fallback={<p className="p-6 text-muted-foreground">{t("common.loading")}</p>}>
@@ -61,9 +110,6 @@ export function ShowPage({ id }: { id: string }) {
             </TabsContent>
             <TabsContent value="revisions" className="overflow-y-auto p-3">
               <RevisionsPanel />
-            </TabsContent>
-            <TabsContent value="chat" className="p-6 text-muted-foreground">
-              {t("show.chat.later")}
             </TabsContent>
           </Tabs>
         </section>
