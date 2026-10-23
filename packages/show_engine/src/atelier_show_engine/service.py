@@ -54,9 +54,15 @@ from atelier_plugin_sdk.roles import ROLE_NAMES, RoleName
 from atelier_show_engine.compiler import CompileError, Compiler, CompileReport, figure_colors
 from atelier_show_engine.config import AtelierConfig
 from atelier_show_engine.diffing import DiffEntry, diff_shows
-from atelier_show_engine.estimate import Segment, TimelineEstimate, estimate_timeline
+from atelier_show_engine.estimate import (
+    PointsLoader,
+    Segment,
+    TimelineEstimate,
+    estimate_timeline,
+)
 from atelier_show_engine.geometry import place
 from atelier_show_engine.importing import UpAxis, copy_asset, load_mesh_file, probe_audio
+from atelier_show_engine.program import FitResult, SceneDraft, fit_holds
 from atelier_show_engine.provenance import (
     IMPORT_MESH,
     Expectation,
@@ -69,6 +75,7 @@ from atelier_show_engine.provenance import (
     producer_for,
 )
 from atelier_show_engine.store import ConflictError, ShowStore, StoreError
+from atelier_show_engine.summary import show_summary
 
 Progress = Callable[[float, str], None]
 SINGLE_STAGE_ROLES: tuple[RoleName, ...] = (
@@ -168,6 +175,22 @@ def _dir_hash(folder: Path) -> str:
         digest.update(path.relative_to(folder).as_posix().encode())
         digest.update(hashlib.sha256(path.read_bytes()).digest())
     return digest.hexdigest()
+
+
+def _points_loader(show: Show, store: ShowStore) -> PointsLoader:
+    """Figure positions for the estimate; stale points are still a good guess of the shape."""
+
+    def load(model_id: str, n: int) -> npt.NDArray[np.float64] | None:
+        card = show.models.get(model_id)
+        artifact_id = card.assets.point_sets.get(n) if card else None
+        if artifact_id is None:
+            return None
+        positions: npt.NDArray[np.float64] = PointSet.load(
+            store.path(show.artifacts[artifact_id].path)
+        ).positions.astype(np.float64)
+        return positions
+
+    return load
 
 
 def _compiled_timeline(show: Show, store: ShowStore) -> TimelineEstimate:
@@ -863,17 +886,83 @@ class ShowService:
             and Provenance(show, self.registry).stale_reason("compiled") is None
         ):
             return _compiled_timeline(show, store)
+        return estimate_timeline(show, _points_loader(show, store))
 
-        def load_points(model_id: str, n: int) -> npt.NDArray[np.float64] | None:
-            artifact_id = show.models[model_id].assets.point_sets.get(n)
-            if artifact_id is None:
-                return None
-            positions: npt.NDArray[np.float64] = PointSet.load(
-                store.path(show.artifacts[artifact_id].path)
-            ).positions.astype(np.float64)
-            return positions
+    # --- programs (ADR-037) ---
 
-        return estimate_timeline(show, load_points)
+    def apply_program(
+        self,
+        store: ShowStore,
+        drafts: Sequence[SceneDraft],
+        *,
+        replace: bool = False,
+        message: str | None = None,
+    ) -> tuple[Show, FitResult]:
+        """A whole program in one revision: new cards, scenes, holds fitted to the budget."""
+        if not drafts:
+            raise ServiceError("a program needs at least one scene")
+        show = store.load()
+        if show.program and not replace:
+            raise ServiceError(
+                f"the show already has {len(show.program)} scenes; replacing them removes them"
+            )
+        scenes: list[Scene] = []
+        for index, draft in enumerate(drafts, start=1):
+            if draft.model_id is not None:
+                if draft.model_id not in show.models:
+                    raise ServiceError(f"scene {index}: no model {draft.model_id!r}")
+                model_id = draft.model_id
+            elif draft.figure is not None:
+                model_id = unique_id("m", draft.figure.name, show.models.keys())
+                show.models[model_id] = ModelCard(
+                    id=model_id, **draft.figure.model_dump(exclude_none=True)
+                )
+            else:
+                raise ServiceError(f"scene {index}: give a new figure or an existing model_id")
+            scenes.append(
+                Scene(id=f"s_{index}", title=draft.title, model_id=model_id, hold_s=draft.hold_s)
+            )
+        show.program = scenes
+        fit = fit_holds(
+            estimate_timeline(show, _points_loader(show, store)),
+            {s.id: s.hold_s for s in scenes},
+        )
+        for scene in show.program:
+            scene.hold_s = fit.holds.get(scene.id, scene.hold_s)
+        try:
+            show = Show.model_validate(show.model_dump(mode="json"))
+        except ValidationError as exc:
+            raise ServiceError(_validation_message(exc)) from exc
+        return self._commit(store, show, message or f"Program: {len(scenes)} scenes"), fit
+
+    def fit_program(self, store: ShowStore) -> tuple[Show, FitResult]:
+        """Fit the holds of the current program to the brief's duration."""
+        show = store.load()
+        if not show.program:
+            raise ServiceError("the program has no scenes")
+        fit = fit_holds(
+            estimate_timeline(show, _points_loader(show, store)),
+            {s.id: s.hold_s for s in show.program},
+        )
+
+        def change(target: Show) -> None:
+            for scene in target.program:
+                scene.hold_s = fit.holds.get(scene.id, scene.hold_s)
+
+        total = f"{fit.total_s:.0f} of {fit.budget_s:.0f} s"
+        return self._edit(store, f"Fit holds to the budget ({total})", change), fit
+
+    def show_summary(self, store: ShowStore) -> str:
+        """The compact picture of the show the assistant reads every turn (ADR-040)."""
+        show = store.load()
+        stale = Provenance(show, self.registry).report()
+        validation = None
+        if show.outputs.validation and stale.get("validation") is None:
+            report = json.loads(
+                store.path(show.artifacts[show.outputs.validation].path).read_text(encoding="utf-8")
+            )
+            validation = (bool(report.get("ok")), len(report.get("violations", [])))
+        return show_summary(show, self.estimate_timeline(store), stale, validation)
 
     # --- compile, validate, export ---
 
