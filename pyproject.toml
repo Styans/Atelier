@@ -13,6 +13,7 @@ dependencies = [
     "atelier-jobs",
     "atelier-worker",
     "atelier-api",
+    "atelier-assistant",
     # Plugins are discovered from plugins/ at runtime; listing them here only installs
     # their dependencies into the platform environment.
     "atelier-builtin-animation",
@@ -50,6 +51,7 @@ atelier-cli = { workspace = true }
 atelier-jobs = { workspace = true }
 atelier-worker = { workspace = true }
 atelier-api = { workspace = true }
+atelier-assistant = { workspace = true }
 atelier-builtin-animation = { workspace = true }
 atelier-builtin-transitions = { workspace = true }
 atelier-builtin-validators = { workspace = true }
@@ -70,6 +72,12 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "PTH", "RUF"]
 # N818: error names are part of the plugin contract (InvalidParams, Cancelled, ...).
 # UP046/UP047: TypeVar generics read better than PEP 695 for the role base classes.
 ignore = ["N818", "UP046", "UP047"]
+# Messages for the user and the assistant are Russian on purpose: Cyrillic letters
+# and the en dash in them are not look-alikes of Latin ones.
+allowed-confusables = [
+    "а", "в", "е", "к", "м", "н", "о", "р", "с", "т", "у", "х",
+    "А", "В", "Е", "К", "М", "Н", "О", "Р", "С", "Т", "Х", "–",
+]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI declares parameters through these calls in defaults.
@@ -97,6 +105,7 @@ mypy_path = [
     "packages/show_engine/src",
     "packages/blender_bridge/src",
     "packages/jobs/src",
+    "packages/assistant/src",
     "apps/cli/src",
     "apps/worker/src",
     "apps/api/src",
@@ -122,4 +131,5 @@ markers = [
     "blender: needs a local Blender (path from atelier.toml); skipped otherwise",
     "slow: spawns subprocesses or builds separate environments",
     "pygmalion: needs Pygmalion's runtime (its own venv); skipped otherwise",
+    "llm: starts a real llama-server on the GPU (ATELIER_LLAMA_EXE, ATELIER_LLAMA_MODEL); skipped otherwise",
 ]

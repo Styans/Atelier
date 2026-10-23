@@ -1,4 +1,3 @@
-# ruff: noqa: RUF001 - the text is Russian on purpose: Cyrillic letters are not look-alikes here
 """A compact text picture of a show for a language model (ADR-040).
 
 The assistant reads this instead of show.json: no points, no artifacts, only what it needs to

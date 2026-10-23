@@ -28,6 +28,16 @@ CORE_ALLOWED: dict[str, frozenset[str]] = {
     "atelier_jobs": frozenset(
         {"atelier_domain", "atelier_plugin_sdk", "atelier_plugin_host", "atelier_show_engine"}
     ),
+    # The chat assistant: an application of the service, like the API (ADR-034).
+    "atelier_assistant": frozenset(
+        {
+            "atelier_domain",
+            "atelier_plugin_sdk",
+            "atelier_plugin_host",
+            "atelier_show_engine",
+            "atelier_jobs",
+        }
+    ),
     "atelier_api": frozenset(
         {
             "atelier_domain",
@@ -35,6 +45,7 @@ CORE_ALLOWED: dict[str, frozenset[str]] = {
             "atelier_plugin_host",
             "atelier_show_engine",
             "atelier_jobs",
+            "atelier_assistant",
         }
     ),
     "atelier_worker": frozenset(
@@ -44,6 +55,7 @@ CORE_ALLOWED: dict[str, frozenset[str]] = {
             "atelier_plugin_host",
             "atelier_show_engine",
             "atelier_jobs",
+            "atelier_assistant",
         }
     ),
     "atelier_cli": frozenset(
@@ -54,6 +66,7 @@ CORE_ALLOWED: dict[str, frozenset[str]] = {
             "atelier_show_engine",
             "atelier_blender_bridge",
             "atelier_jobs",
+            "atelier_assistant",
             "atelier_worker",
             "atelier_api",
         }
