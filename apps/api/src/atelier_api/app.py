@@ -24,8 +24,9 @@ from pydantic import BaseModel, Field
 
 from atelier_api import __version__
 from atelier_api.binary import mesh_glb, points_payload, show_frames
+from atelier_api.chat import chat_router
 from atelier_domain import AnimTrack, Show, StageName
-from atelier_jobs import JOB_KINDS, JobQueue, index_commits
+from atelier_jobs import JOB_KINDS, ChatStore, JobQueue, index_commits
 from atelier_plugin_host import ComponentNotFound, LoadedPlugin
 from atelier_plugin_sdk import ROLE_NAMES, CompiledShow, MeshData, PluginError
 from atelier_plugin_sdk.roles import RoleName
@@ -615,6 +616,11 @@ def create_app(
         return StreamingResponse(
             stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"}
         )
+
+    # --- chat (phase 3) ---
+
+    app.state.chat = ChatStore(jobs)
+    app.include_router(chat_router(svc, jobs, app.state.chat, store_for, view))
 
     # --- the web UI ---
 

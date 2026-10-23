@@ -56,6 +56,8 @@ class AtelierConfig(_Section):
     fleet_presets: dict[str, FleetLimits] = Field(default_factory=dict)
     plugin_settings: dict[str, dict[str, str]] = Field(default_factory=dict)
     pipeline: PipelineConfig = Field(default_factory=lambda: DEFAULT_PIPELINE.model_copy(deep=True))
+    # [assistant]: read and validated by atelier_assistant (the core does not know its types).
+    assistant: dict[str, Any] = Field(default_factory=dict)
 
     def resolve(self, path: Path) -> Path:
         return path if path.is_absolute() else (self.root / path).resolve()
