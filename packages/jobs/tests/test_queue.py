@@ -1,3 +1,4 @@
+import sqlite3
 import time
 from pathlib import Path
 
@@ -32,6 +33,45 @@ def test_order_holds_when_jobs_share_a_timestamp(
 
     assert [queue.claim(pid=1).id for _ in ids] == ids  # type: ignore[union-attr]
     assert [j.id for j in queue.jobs(limit=20)] == ids[::-1]
+
+
+def test_higher_priority_is_claimed_first_ties_stay_fifo(queue: JobQueue) -> None:
+    running = queue.submit("s", "generate_images", {"prompt": "x"})
+    assert queue.claim(pid=1).id == running.id  # type: ignore[union-attr]
+    first = queue.submit("s", "compile")
+    second = queue.submit("s", "validate")
+    turn = queue.submit("s", "assistant_turn", priority=10)
+    later_turn = queue.submit("s", "assistant_turn", priority=10)
+
+    order = [queue.claim(pid=1) for _ in range(4)]
+
+    assert [j.id for j in order if j] == [turn.id, later_turn.id, first.id, second.id]
+    assert queue.get(running.id).status == "running"  # type: ignore[union-attr]
+    assert not turn.gpu and turn.priority == 10 and first.priority == 0
+
+
+def test_database_without_priority_gets_the_column(tmp_path: Path) -> None:
+    path = tmp_path / "atelier.db"
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE jobs (id VARCHAR PRIMARY KEY, show_id VARCHAR, kind VARCHAR, args VARCHAR, "
+        "status VARCHAR, progress FLOAT, message VARCHAR, cancel_requested BOOLEAN, gpu BOOLEAN, "
+        "worker_pid INTEGER, created_at FLOAT, started_at FLOAT, finished_at FLOAT, "
+        "updated_at FLOAT, result VARCHAR, error VARCHAR, log_path VARCHAR)"
+    )
+    old.execute(
+        "INSERT INTO jobs VALUES ('j_old', 's', 'compile', '{}', 'queued', 0, '', 0, 0, NULL, "
+        "1, NULL, NULL, 1, NULL, NULL, NULL)"
+    )
+    old.commit()
+    old.close()
+
+    queue = JobQueue(path)
+    JobQueue(path)  # a second start finds the column in place
+    urgent = queue.submit("s", "assistant_turn", priority=10)
+
+    assert queue.get("j_old").priority == 0  # type: ignore[union-attr]
+    assert [queue.claim(pid=1).id for _ in range(2)] == [urgent.id, "j_old"]  # type: ignore[union-attr]
 
 
 def test_gpu_kinds_are_flagged(queue: JobQueue) -> None:

@@ -18,12 +18,21 @@ from typing import Any
 
 from sqlalchemy import event, literal_column, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 from atelier_domain import Show
 from atelier_show_engine.store import COMMIT_LISTENERS, RevisionInfo, ShowStore
 
-JOB_KINDS = ("points", "compile", "validate", "export", "generate_images", "generate_mesh")
+JOB_KINDS = (
+    "points",
+    "compile",
+    "validate",
+    "export",
+    "generate_images",
+    "generate_mesh",
+    "assistant_turn",
+)
 GPU_KINDS = frozenset({"generate_images", "generate_mesh"})
 ACTIVE = ("queued", "running")
 
@@ -40,6 +49,7 @@ class Job(SQLModel, table=True):
     message: str = ""
     cancel_requested: bool = False
     gpu: bool = False
+    priority: int = 0  # higher is claimed first; a chat turn jumps the queue (ADR-036)
     worker_pid: int | None = None
     created_at: float = Field(default_factory=time.time)
     started_at: float | None = None
@@ -96,6 +106,7 @@ class JobQueue:
         )
         event.listen(self.engine, "connect", _sqlite_pragmas)
         SQLModel.metadata.create_all(self.engine)
+        _add_priority_column(self.engine)
 
     @contextmanager
     def session(self) -> Iterator[Session]:
@@ -104,7 +115,9 @@ class JobQueue:
 
     # --- queue ---
 
-    def submit(self, show_id: str, kind: str, args: dict[str, Any] | None = None) -> Job:
+    def submit(
+        self, show_id: str, kind: str, args: dict[str, Any] | None = None, *, priority: int = 0
+    ) -> Job:
         if kind not in JOB_KINDS:
             raise ValueError(f"unknown job kind {kind!r}; known: {', '.join(JOB_KINDS)}")
         job = Job(
@@ -113,6 +126,7 @@ class JobQueue:
             kind=kind,
             args=json.dumps(args or {}),
             gpu=kind in GPU_KINDS,
+            priority=priority,
         )
         with self.session() as session:
             session.add(job)
@@ -120,10 +134,11 @@ class JobQueue:
         return job
 
     def claim(self, pid: int) -> Job | None:
-        """Take the oldest queued job; atomic, so two workers never get the same one.
+        """Take the queued job with the highest priority, oldest first; atomic, so two workers
+        never get the same one. A running job is never preempted.
 
-        Order is SQLite's rowid (insertion order): jobs submitted back to back can share a
-        ``created_at``, and the ids are random.
+        Order within a priority is SQLite's rowid (insertion order): jobs submitted back to back
+        can share a ``created_at``, and the ids are random.
         """
         now = time.time()
         with self.engine.begin() as conn:
@@ -131,8 +146,8 @@ class JobQueue:
                 text(
                     "UPDATE jobs SET status='running', worker_pid=:pid, started_at=:now, "
                     "updated_at=:now, message='' WHERE id = (SELECT id FROM jobs "
-                    "WHERE status='queued' ORDER BY rowid LIMIT 1) AND status='queued' "
-                    "RETURNING id"
+                    "WHERE status='queued' ORDER BY priority DESC, rowid LIMIT 1) "
+                    "AND status='queued' RETURNING id"
                 ),
                 {"pid": pid, "now": now},
             ).first()
@@ -229,6 +244,20 @@ def _sqlite_pragmas(dbapi_connection: Any, _record: Any) -> None:
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA busy_timeout=30000")
     cursor.close()
+
+
+def _add_priority_column(engine: Engine) -> None:
+    """``create_all`` never alters a table, so a database made before ``priority`` gets it here."""
+    with engine.begin() as conn:
+        columns = {row[1] for row in conn.execute(text("PRAGMA table_info(jobs)"))}
+        if "priority" in columns:
+            return
+        try:
+            conn.execute(text("ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0"))
+        except OperationalError as error:
+            # The API and the worker start together; the other one may have just added it.
+            if "duplicate column" not in str(error):
+                raise
 
 
 def index_commits(queue: JobQueue) -> Callable[[ShowStore, Show, RevisionInfo], None]:
