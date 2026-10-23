@@ -1,48 +1,39 @@
 import { describe, expect, it } from "vitest";
 
-import type { CompiledSummary, Scene } from "@/api/types";
+import type { TimelineEstimate } from "@/api/types";
 
 import { layoutBlocks, totalDuration } from "./timelineLayout";
 
-const scene = (id: string, hold: number, transition: number | null): Scene => ({
-  id,
-  title: id,
-  model_id: "m",
-  hold_s: hold,
-  transition_in: { duration_s: transition, planner: null, params: {} },
-  animation: null,
-  offset_m: [0, 0, 0],
-  rotation_deg: [0, 0, 0],
-});
+const timeline = {
+  segments: [
+    { kind: "takeoff", scene_id: null, title: "Takeoff", start_s: 0, duration_s: 7.8, basis: "exact" },
+    { kind: "transition", scene_id: "s_1", title: "To A", start_s: 7.8, duration_s: 42, basis: "proxy" },
+    { kind: "hold", scene_id: "s_1", title: "A", start_s: 49.8, duration_s: 15, basis: "exact" },
+    { kind: "transition", scene_id: "s_2", title: "To B", start_s: 64.8, duration_s: 4, basis: "fixed" },
+  ],
+  total_s: 68.8,
+  budget_s: 60,
+  over_budget_s: 8.8,
+  compiled: false,
+  music_start_s: null,
+  music_end_s: null,
+  notes: [],
+} satisfies TimelineEstimate;
 
 describe("layoutBlocks", () => {
-  it("plans from the program, estimating automatic transitions", () => {
-    const blocks = layoutBlocks([scene("s_1", 10, null), scene("s_2", 5, 4)], null, 8);
+  it("draws the server's timeline and marks what is only estimated", () => {
+    const blocks = layoutBlocks(timeline);
 
-    expect(blocks.map((b) => [b.kind, b.start, b.duration, b.estimated])).toEqual([
-      ["transition", 0, 8, true],
-      ["hold", 8, 10, false],
-      ["transition", 18, 4, false],
-      ["hold", 22, 5, false],
+    expect(blocks.map((b) => [b.kind, b.sceneId, b.start, b.duration, b.estimated])).toEqual([
+      ["takeoff", null, 0, 7.8, false],
+      ["transition", "s_1", 7.8, 42, true],
+      ["hold", "s_1", 49.8, 15, false],
+      ["transition", "s_2", 64.8, 4, false],
     ]);
-    expect(totalDuration(blocks)).toBe(27);
+    expect(totalDuration(blocks)).toBeCloseTo(68.8);
   });
 
-  it("uses the compiled marks when available", () => {
-    const compiled = {
-      fps: 10,
-      marks: [
-        { kind: "ground", scene_id: null, title: "", start_frame: 0, end_frame: 0 },
-        { kind: "takeoff", scene_id: null, title: "", start_frame: 1, end_frame: 40 },
-        { kind: "hold", scene_id: "s_1", title: "", start_frame: 41, end_frame: 90 },
-      ],
-    } as CompiledSummary;
-
-    const blocks = layoutBlocks([], compiled);
-
-    expect(blocks.map((b) => [b.kind, b.start, b.duration])).toEqual([
-      ["takeoff", 0.1, 4],
-      ["hold", 4.1, 5],
-    ]);
+  it("is empty until the timeline has loaded", () => {
+    expect(layoutBlocks(undefined)).toEqual([]);
   });
 });

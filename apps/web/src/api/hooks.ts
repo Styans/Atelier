@@ -12,6 +12,7 @@ export const keys = {
   show: (id: string) => ["show", id] as const,
   jobs: (id: string) => ["jobs", id] as const,
   compiled: (id: string) => ["compiled", id] as const,
+  timeline: (id: string) => ["timeline", id] as const,
   validation: (id: string) => ["validation", id] as const,
   exports: (id: string) => ["exports", id] as const,
   revisions: (id: string) => ["revisions", id] as const,
@@ -29,7 +30,7 @@ export function useShow(id: string) {
 
 /** Everything a show screen derives from the show: refetched together after a change. */
 export function invalidateShow(client: ReturnType<typeof useQueryClient>, id: string) {
-  for (const key of [keys.show(id), keys.compiled(id), keys.validation(id), keys.exports(id), keys.revisions(id)]) {
+  for (const key of [keys.show(id), keys.compiled(id), keys.timeline(id), keys.validation(id), keys.exports(id), keys.revisions(id)]) {
     void client.invalidateQueries({ queryKey: key });
   }
 }

@@ -173,6 +173,27 @@ export interface SceneMark {
   end_frame: number;
 }
 
+export interface TimelineSegment {
+  kind: "takeoff" | "transition" | "hold" | "landing";
+  scene_id: string | null;
+  title: string;
+  start_s: number;
+  duration_s: number;
+  basis: "exact" | "points" | "proxy" | "fixed";
+}
+
+/** GET /api/shows/{id}/timeline: exact from the compiled show, otherwise estimated (ADR-038). */
+export interface TimelineEstimate {
+  segments: TimelineSegment[];
+  total_s: number;
+  budget_s: number;
+  over_budget_s: number;
+  compiled: boolean;
+  music_start_s: number | null;
+  music_end_s: number | null;
+  notes: string[];
+}
+
 export interface CompiledSummary {
   frames: number;
   drones: number;

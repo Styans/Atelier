@@ -144,7 +144,8 @@ export const ru = {
   "timeline.hold": "удержание",
   "timeline.auto": "авто",
   "timeline.compiled": "по компиляции",
-  "timeline.planned": "по плану (переходы — оценка)",
+  "timeline.planned": "оценка до компиляции",
+  "timeline.estimate": "оценка",
 
   "scene.title": "Сцена",
   "scene.name": "Название",

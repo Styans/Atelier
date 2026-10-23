@@ -30,6 +30,7 @@ from atelier_plugin_sdk.artifacts import SegmentKind
 from atelier_show_engine.geometry import (
     ease,
     grid_positions,
+    hold_frames,
     place,
     region_mask,
     smootherstep,
@@ -129,7 +130,7 @@ class Compiler:
     def _sample_hold(self, scene: Scene, local: Array) -> Array:
         """Figure-local positions for every frame of the hold, tracks applied in order."""
         fps = self.show.fps
-        frames = max(2, round(scene.hold_s * fps) + 1)
+        frames = hold_frames(scene.hold_s, fps)
         t_scene = np.arange(frames) / fps
         points = np.repeat(local[None], frames, axis=0)
         for index, track in enumerate(scene.animation.tracks if scene.animation else []):

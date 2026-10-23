@@ -40,6 +40,7 @@ from atelier_domain import (
 from atelier_domain.ids import new_show_id, unique_id
 from atelier_plugin_host import PluginRegistry
 from atelier_plugin_sdk import (
+    CompiledShow,
     CompiledShowRef,
     ImageRef,
     MeshRef,
@@ -53,6 +54,7 @@ from atelier_plugin_sdk.roles import ROLE_NAMES, RoleName
 from atelier_show_engine.compiler import CompileError, Compiler, CompileReport, figure_colors
 from atelier_show_engine.config import AtelierConfig
 from atelier_show_engine.diffing import DiffEntry, diff_shows
+from atelier_show_engine.estimate import Segment, TimelineEstimate, estimate_timeline
 from atelier_show_engine.geometry import place
 from atelier_show_engine.importing import UpAxis, copy_asset, load_mesh_file, probe_audio
 from atelier_show_engine.provenance import (
@@ -166,6 +168,28 @@ def _dir_hash(folder: Path) -> str:
         digest.update(path.relative_to(folder).as_posix().encode())
         digest.update(hashlib.sha256(path.read_bytes()).digest())
     return digest.hexdigest()
+
+
+def _compiled_timeline(show: Show, store: ShowStore) -> TimelineEstimate:
+    compiled = CompiledShow.load(store.path(show.artifacts[show.outputs.compiled or ""].path))
+    fps = compiled.fps
+    segments = [
+        Segment(
+            kind=m.kind,
+            scene_id=m.scene_id,
+            title=m.title,
+            start_s=(m.start_frame - 1) / fps,
+            duration_s=(m.end_frame - m.start_frame + 1) / fps,
+            basis="exact",
+        )
+        for m in compiled.marks
+        if m.kind != "ground"
+    ]
+    timeline = TimelineEstimate(segments, show.brief.duration_s, compiled=True)
+    if compiled.audio is not None:
+        timeline.music_start_s = compiled.audio.offset_s
+        timeline.music_end_s = compiled.audio.offset_s + compiled.audio.duration_s
+    return timeline
 
 
 class ShowService:
@@ -830,6 +854,26 @@ class ShowService:
 
     def stale_report(self, store: ShowStore) -> dict[str, str | None]:
         return Provenance(store.load(), self.registry).report()
+
+    def estimate_timeline(self, store: ShowStore) -> TimelineEstimate:
+        """The program's timeline: exact from the current compiled show, else estimated."""
+        show = store.load()
+        if (
+            show.outputs.compiled
+            and Provenance(show, self.registry).stale_reason("compiled") is None
+        ):
+            return _compiled_timeline(show, store)
+
+        def load_points(model_id: str, n: int) -> npt.NDArray[np.float64] | None:
+            artifact_id = show.models[model_id].assets.point_sets.get(n)
+            if artifact_id is None:
+                return None
+            positions: npt.NDArray[np.float64] = PointSet.load(
+                store.path(show.artifacts[artifact_id].path)
+            ).positions.astype(np.float64)
+            return positions
+
+        return estimate_timeline(show, load_points)
 
     # --- compile, validate, export ---
 

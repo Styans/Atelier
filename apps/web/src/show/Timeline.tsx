@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { api } from "@/api/client";
 import { keys, useEdit } from "@/api/hooks";
-import type { CompiledSummary, Scene, ValidationReport } from "@/api/types";
+import type { Scene, TimelineEstimate, ValidationReport } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/primitives";
 import { t } from "@/i18n/ru";
@@ -27,10 +27,10 @@ export function Timeline() {
   const show = view.show;
   const [editing, setEditing] = useState<Scene | "new" | null>(null);
   const fresh = view.stale.compiled === null;
-  const compiled = useQuery({
-    queryKey: keys.compiled(id),
-    queryFn: () => api.get<CompiledSummary>(`/api/shows/${id}/compiled`),
-    enabled: Boolean(show.outputs.compiled),
+  const timeline = useQuery({
+    queryKey: [...keys.timeline(id), show.revision],
+    queryFn: () => api.get<TimelineEstimate>(`/api/shows/${id}/timeline`),
+    placeholderData: (previous) => previous,
   });
   const validation = useQuery({
     queryKey: keys.validation(id),
@@ -42,10 +42,11 @@ export function Timeline() {
     api.del(`/api/shows/${id}/scenes/${sceneId}${base !== undefined ? `?base_revision=${base}` : ""}`),
   );
 
-  const blocks = layoutBlocks(show.program, fresh && compiled.data ? compiled.data : null);
+  const blocks = layoutBlocks(timeline.data);
   const total = totalDuration(blocks);
   const budget = show.brief.duration_s;
-  const music = show.audio ? (compiled.data?.audio?.offset_s ?? 0) + show.audio.duration_s : null;
+  const music = timeline.data?.music_end_s ?? null;
+  const exact = timeline.data?.compiled ?? false;
   const span = Math.max(total, budget, music ?? 0, 1);
   const violations = fresh && view.stale.validation === null ? validation.data?.violations ?? [] : [];
   const seek = (time: number) => {
@@ -67,7 +68,7 @@ export function Timeline() {
           {formatSeconds(budget)}
           {total > budget && <span className="text-warning"> ({t("timeline.overBudget", { time: formatSeconds(total - budget) })})</span>}
           {music !== null && ` · ${t("timeline.music")} ${formatSeconds(music)}`}
-          <span className="ml-2 text-xs text-muted-foreground">{fresh && compiled.data ? t("timeline.compiled") : t("timeline.planned")}</span>
+          <span className="ml-2 text-xs text-muted-foreground">{exact ? t("timeline.compiled") : t("timeline.planned")}</span>
         </div>
         <Button size="sm" onClick={() => setEditing("new")} disabled={Object.keys(show.models).length === 0}>
           <Plus className="h-4 w-4" /> {t("timeline.add")}
@@ -82,7 +83,7 @@ export function Timeline() {
               key={i}
               className={cn("absolute top-5 h-12 overflow-hidden border-r px-1 text-left text-[10px]", COLORS[b.kind], b.estimated && "opacity-60")}
               style={{ left: `${(b.start / span) * 100}%`, width: `${(b.duration / span) * 100}%` }}
-              title={`${b.kind} ${scene?.title ?? ""} ${formatSeconds(b.duration)}`}
+              title={`${b.kind} ${scene?.title ?? b.title} ${formatSeconds(b.duration)}${b.estimated ? ` (${t("timeline.estimate")})` : ""}`}
               onClick={() => (scene ? setEditing(scene) : seek(b.start))}
             >
               {b.kind === "hold" ? scene?.title : ""}

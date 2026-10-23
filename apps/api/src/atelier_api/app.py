@@ -453,6 +453,11 @@ def create_app(
             "meta": compiled.meta,
         }
 
+    @app.get("/api/shows/{show_id}/timeline")
+    def timeline(show_id: str) -> dict[str, Any]:
+        """Exact from the current compiled show, otherwise estimated (ADR-038)."""
+        return svc.estimate_timeline(store_for(show_id)).as_dict()
+
     @app.get("/api/shows/{show_id}/compiled/frames")
     def compiled_frames(show_id: str, fps: float = Query(10.0, gt=0, le=60)) -> Response:
         payload = show_frames(compiled_for(store_for(show_id)), fps)

@@ -74,10 +74,14 @@ def test_the_phase_one_path_over_http(env: Env, fixture_files: dict[str, Path]) 
     star = {"model_id": "m_star", "hold_s": 5, "rotation_deg": [0, 0, 45], "tracks": [spin]}
     added = ok(client.post(f"/api/shows/{sid}/scenes", json=star), 201)
     assert added["show"]["program"][1]["rotation_deg"] == [0, 0, 45]
+    planned = ok(client.get(f"/api/shows/{sid}/timeline"))
+    assert not planned["compiled"] and planned["segments"][0]["kind"] == "takeoff"
     compiled = run_job(client, worker, sid, "compile")
     assert compiled["result"]["frames"] > 0
 
     summary = ok(client.get(f"/api/shows/{sid}/compiled"))
+    exact = ok(client.get(f"/api/shows/{sid}/timeline"))
+    assert exact["compiled"] and np.isclose(exact["total_s"], summary["duration_s"])
     header, arrays = unpack(client.get(f"/api/shows/{sid}/compiled/frames?fps=10").content)
     assert arrays["positions"].shape[1:] == (16, 3)
     assert np.isclose(arrays["times"][-1], summary["duration_s"])

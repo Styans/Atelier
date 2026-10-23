@@ -154,16 +154,25 @@ def grid_positions(count: int, spacing: float, center: tuple[float, float, float
     return result
 
 
-def vertical_move(
-    start: Array, dz: float, speed: float, accel: float, fps: int, margin: float = 1.1
-) -> Array:
-    """Synchronized vertical flight by ``dz``, quintic timing within speed and acceleration."""
+def vertical_frames(dz: float, speed: float, accel: float, fps: int, margin: float = 1.1) -> int:
+    """Frames of a synchronized vertical flight by ``dz`` (both ends included)."""
     distance = abs(dz)
     duration = (
         max(PEAK_VELOCITY * distance / speed, math.sqrt(PEAK_ACCELERATION * distance / accel))
         * margin
     )
-    frames = max(2, math.ceil(duration * fps) + 1)
+    return max(2, math.ceil(duration * fps) + 1)
+
+
+def hold_frames(hold_s: float, fps: int) -> int:
+    return max(2, round(hold_s * fps) + 1)
+
+
+def vertical_move(
+    start: Array, dz: float, speed: float, accel: float, fps: int, margin: float = 1.1
+) -> Array:
+    """Synchronized vertical flight by ``dz``, quintic timing within speed and acceleration."""
+    frames = vertical_frames(dz, speed, accel, fps, margin)
     s = smootherstep(np.linspace(0.0, 1.0, frames))
     lift = np.zeros((frames, 1, 3))
     lift[:, 0, 2] = dz * s
