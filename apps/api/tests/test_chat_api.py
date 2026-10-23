@@ -3,6 +3,13 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from atelier_assistant.llm import (
+    AssistantMessage,
+    LLMError,
+    ScriptedClient,
+    text_block,
+    tool_use_block,
+)
 from atelier_jobs import ChatStore, JobQueue
 from atelier_show_engine.program import FigureDraft, SceneDraft
 from atelier_worker.worker import Worker
@@ -84,11 +91,63 @@ def test_an_answer_is_rolled_back_to_where_its_turn_started(env: Env) -> None:
     assert client.post(f"/api/shows/{sid}/chat/j_nope/rollback", json={}).status_code == 404
 
 
+def test_a_whole_turn_through_the_queue(env: Env, scripted: ScriptedClient) -> None:
+    client, worker = env
+    sid = new_show(client, drones=16)["id"]
+    scenes = [{"title": f"Сцена {i}", "hold_s": 12, "figure": {"name": f"F{i}"}} for i in range(6)]
+    scripted.replies = [
+        AssistantMessage(
+            [
+                tool_use_block("c1", "update_brief", {"occasion": "юбилей", "duration_s": 150}),
+                tool_use_block("c2", "propose_program", {"scenes": scenes}),
+            ],
+            stop="tool_use",
+        ),
+        AssistantMessage([text_block("Сделал бриф и программу из 6 сцен.")]),
+    ]
+    turn = ok(client.post(f"/api/shows/{sid}/chat", json={"text": "юбилей, 2.5 минуты"}), 202)
+
+    done = worker.run_once()
+    with client.stream("GET", f"/api/shows/{sid}/chat/events?turn={turn['job']['id']}") as stream:
+        body = "".join(stream.iter_text())
+    history = ok(client.get(f"/api/shows/{sid}/chat"))
+    show = ok(client.get(f"/api/shows/{sid}"))["show"]
+
+    assert done is not None and done.status == "done", done and done.error
+    assert '"stage": "loading"' in body  # the model was not running: the user sees it start
+    assert "event: done" in body and "Сделал бриф" in body
+    assert [m["role"] for m in history["messages"]] == ["user", "assistant", "user", "assistant"]
+    assert history["active_turn"] is None
+    assert show["brief"]["occasion"] == "юбилей" and len(show["program"]) == 6
+    assert ok(client.get(f"/api/shows/{sid}/timeline"))["total_s"] <= 150
+
+
+def test_a_turn_without_a_model_says_so_in_the_chat(env: Env, scripted: ScriptedClient) -> None:
+    client, worker = env
+    sid = new_show(client)["id"]
+    scripted.replies = [LLMError("Локальная модель не отвечает")]
+    ok(client.post(f"/api/shows/{sid}/chat", json={"text": "привет"}), 202)
+
+    done = worker.run_once()
+    messages = ok(client.get(f"/api/shows/{sid}/chat"))["messages"]
+
+    assert done is not None and done.status == "failed"
+    assert messages[-1]["role"] == "notice"
+    assert "не отвечает" in messages[-1]["content"][0]["text"]
+
+
+def test_assistant_health_explains_what_is_missing(env: Env) -> None:
+    client, _ = env
+    health = ok(client.get("/api/assistant/health"))
+
+    assert health["configured"] is False and "[assistant.llama_server]" in health["problem"]
+
+
 def test_proposals_run_only_when_applied_and_only_once(env: Env) -> None:
     client, _ = env
     chat, _ = parts(client)
     sid = new_show(client)["id"]
-    replace =chat.add_proposal(sid, "replace_program", {"scenes": drafts(6)}, "новая программа")
+    replace = chat.add_proposal(sid, "replace_program", {"scenes": drafts(6)}, "новая программа")
     compile_ = chat.add_proposal(sid, "compile", {}, "скомпилировать")
     dismissed = chat.add_proposal(sid, "export", {}, "экспорт")
 

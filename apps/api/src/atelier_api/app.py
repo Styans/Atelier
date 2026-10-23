@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 from atelier_api import __version__
 from atelier_api.binary import mesh_glb, points_payload, show_frames
 from atelier_api.chat import chat_router
+from atelier_assistant.runtime import AssistantRuntime
 from atelier_domain import AnimTrack, Show, StageName
 from atelier_jobs import JOB_KINDS, ChatStore, JobQueue, index_commits
 from atelier_plugin_host import ComponentNotFound, LoadedPlugin
@@ -207,6 +208,13 @@ def create_app(
     @app.get("/api/health")
     def health() -> dict[str, Any]:
         return {"ok": True, "version": __version__}
+
+    @app.get("/api/assistant/health")
+    def assistant_health() -> dict[str, Any]:
+        """Is the assistant configured and are its files there (the worker runs the model)."""
+        health = AssistantRuntime(config).health()
+        health.pop("running", None)  # only the worker knows; this process never starts it
+        return health
 
     @app.get("/api/meta")
     def meta() -> dict[str, Any]:

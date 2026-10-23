@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "The worker process: runs queued jobs one at a time"
 requires-python = ">=3.12"
 dependencies = [
+    "atelier-assistant",
     "atelier-jobs",
     "atelier-show-engine",
 ]

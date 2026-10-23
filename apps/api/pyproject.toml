@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Atelier HTTP API: REST + SSE over the show service, serves the web UI"
 requires-python = ">=3.12"
 dependencies = [
+    "atelier-assistant",
     "atelier-jobs",
     "atelier-plugin-host",
     "atelier-show-engine",

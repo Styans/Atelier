@@ -6,6 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from atelier_api.app import create_app
+from atelier_assistant.llm import ScriptedClient
+from atelier_assistant.runtime import AssistantRuntime
 from atelier_jobs import JobQueue
 from atelier_plugin_host import PluginRegistry
 from atelier_show_engine.config import AtelierConfig
@@ -35,12 +37,21 @@ def registry() -> Iterator[PluginRegistry]:
 
 
 @pytest.fixture
-def env(tmp_path: Path, registry: PluginRegistry) -> Iterator[tuple[TestClient, Worker]]:
+def scripted() -> ScriptedClient:
+    """The chat model of the worker in these tests; a test puts its replies in ``.replies``."""
+    return ScriptedClient([])
+
+
+@pytest.fixture
+def env(
+    tmp_path: Path, registry: PluginRegistry, scripted: ScriptedClient
+) -> Iterator[tuple[TestClient, Worker]]:
     config = AtelierConfig(root=tmp_path)
     queue = JobQueue(config.cache_dir / "atelier.db")
     service = ShowService(config, registry, author="ui")
     app = create_app(config, service=service, queue=queue, web_dist=tmp_path / "no-dist")
-    worker = Worker(ShowService(config, registry, author="worker"), queue)
+    assistant = AssistantRuntime(config, client_factory=lambda: scripted)
+    worker = Worker(ShowService(config, registry, author="worker"), queue, assistant)
     with TestClient(app) as client:
         yield client, worker
     COMMIT_LISTENERS.clear()

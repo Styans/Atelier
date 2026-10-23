@@ -13,7 +13,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from atelier_jobs import Job, JobQueue, index_commits
+from atelier_assistant.llm import LLMError
+from atelier_assistant.runtime import AssistantRuntime
+from atelier_jobs import ChatStore, Job, JobQueue, index_commits
 from atelier_plugin_sdk import Cancelled
 from atelier_show_engine.compiler import CompileError
 from atelier_show_engine.config import AtelierConfig, load_config
@@ -35,9 +37,13 @@ def queue_path(config: AtelierConfig) -> Path:
 
 
 class Worker:
-    def __init__(self, service: ShowService, queue: JobQueue) -> None:
+    def __init__(
+        self, service: ShowService, queue: JobQueue, assistant: AssistantRuntime | None = None
+    ) -> None:
         self.service = service
         self.queue = queue
+        self.chat = ChatStore(queue)
+        self.assistant = assistant or AssistantRuntime(service.config)
         self.pid = os.getpid()
         logging.getLogger("atelier").setLevel(logging.INFO)  # job logs need INFO
 
@@ -46,6 +52,8 @@ class Worker:
         job = self.queue.claim(self.pid)
         if job is None:
             return None
+        if job.gpu:
+            self.assistant.release()  # the chat model and a GPU job do not fit on one card
         self.execute(job)
         return self.queue.get(job.id)
 
@@ -55,6 +63,7 @@ class Worker:
             log.warning("marked %d orphaned jobs as failed", len(orphans))
         while not stop.is_set():
             if self.run_once() is None:
+                self.assistant.idle()
                 stop.wait(poll_s)
 
     def _progress(self, job: Job) -> Callable[[float, str], None]:
@@ -148,7 +157,52 @@ class Worker:
                 store, args["model_id"], args.get("concept"), on_progress=progress
             )
             return {"artifact": record.id, "path": record.path}
+        if job.kind == "assistant_turn":
+            return self._turn(store, job)
         raise ServiceError(f"unknown job kind {job.kind!r}")
+
+    def _turn(self, store: ShowStore, job: Job) -> dict[str, Any]:
+        """One chat turn; what goes wrong is told in the chat too, not only in the job."""
+        last_check = [0.0]
+
+        def emit(kind: str, payload: dict[str, Any]) -> None:
+            self.chat.emit(job.id, kind, payload)
+            now = time.monotonic()
+            if now - last_check[0] >= PROGRESS_INTERVAL_S:
+                last_check[0] = now
+                if self.queue.cancel_requested(job.id):
+                    raise JobCancelled("cancelled by the user")
+
+        def notice(text: str, error: str) -> None:
+            self.chat.append(
+                job.show_id,
+                "notice",
+                [{"type": "text", "text": text}],
+                turn_job_id=job.id,
+                revision_before=store.current_revision(),
+            )
+            self.chat.emit(job.id, "error", {"message": error})
+
+        try:
+            if not self.assistant.running():
+                self.chat.emit(job.id, "status", {"stage": "loading"})
+            agent = self.assistant.agent(self.service, self.chat)
+            result = agent.run_turn(store, job.show_id, job.id, emit)
+        except JobCancelled:
+            notice("Ответ остановлен.", "остановлено")
+            raise
+        except LLMError as exc:
+            notice(f"Ассистент не смог ответить: {exc}", str(exc))
+            raise ServiceError(str(exc)) from exc
+        return {
+            "revision_before": result.revision_before,
+            "revision_after": result.revision_after,
+            "steps": result.steps,
+            "tool_calls": result.tool_calls,
+            "failures": result.failures,
+            "proposals": result.proposals,
+            "stopped": result.stopped,
+        }
 
 
 def main() -> int:
@@ -159,10 +213,13 @@ def main() -> int:
     stop = threading.Event()
     with ShowService(config, author="worker") as service:
         log.info("worker %d ready (%s)", os.getpid(), queue.path)
+        worker = Worker(service, queue)
         try:
-            Worker(service, queue).run_forever(stop)
+            worker.run_forever(stop)
         except KeyboardInterrupt:
             stop.set()
+        finally:
+            worker.assistant.close()  # frees the chat model's video memory
     return 0
 
 
