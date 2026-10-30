@@ -88,6 +88,8 @@ def test_an_answer_is_rolled_back_to_where_its_turn_started(env: Env) -> None:
     view = ok(client.post(f"/api/shows/{sid}/chat/{turn}/rollback", json={}))
 
     assert view["show"]["program"] == [] and view["show"]["revision"] == before + 2
+    messages = ok(client.get(f"/api/shows/{sid}/chat"))["messages"]
+    assert all(m["rolled_back_at"] for m in messages)  # the model will not see this turn
     assert client.post(f"/api/shows/{sid}/chat/j_nope/rollback", json={}).status_code == 404
 
 

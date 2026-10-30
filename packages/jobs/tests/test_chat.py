@@ -41,6 +41,16 @@ def test_history_is_numbered_per_show(chat: ChatStore) -> None:
     assert [m.seq for m in chat.history("a", limit=2)] == [2, 3]
 
 
+def test_a_rolled_back_turn_is_marked_once(chat: ChatStore) -> None:
+    chat.append("a", "user", _text("первый"), turn_job_id="j_1")
+    chat.append("a", "user", _text("второй"), turn_job_id="j_2")
+    chat.append("a", "assistant", _text("ок"), turn_job_id="j_2")
+
+    assert chat.mark_rolled_back("a", "j_2") == 2
+    assert chat.mark_rolled_back("a", "j_2") == 0
+    assert [m.rolled_back_at is not None for m in chat.history("a")] == [False, True, True]
+
+
 def test_bad_role_or_block_is_refused(chat: ChatStore) -> None:
     with pytest.raises(ValueError, match="unknown chat role"):
         chat.append("a", "system", _text("x"))

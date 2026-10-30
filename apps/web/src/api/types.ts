@@ -141,6 +141,7 @@ export interface ChatMessage {
   revision_before: number | null;
   revision_after: number | null;
   created_at: number;
+  rolled_back_at: number | null;
 }
 
 export interface Proposal {

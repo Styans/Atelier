@@ -57,7 +57,8 @@ def _size(message: Message) -> int:
 
 
 def to_messages(history: list[ChatMessage]) -> list[Message]:
-    """The chat as the model sees it: notices are for people; long chats lose their start.
+    """The chat as the model sees it: notices are for people, rolled-back turns are gone (the
+    model would think it had already done what they did); long chats lose their start.
 
     A cut never leaves a tool result without its call: the kept part starts at a user
     message that is not a tool result.
@@ -65,7 +66,7 @@ def to_messages(history: list[ChatMessage]) -> list[Message]:
     messages: list[Message] = [
         {"role": "user" if m.role == "user" else "assistant", "content": m.blocks()}
         for m in history
-        if m.role in ("user", "assistant") and m.blocks()
+        if m.role in ("user", "assistant") and m.blocks() and m.rolled_back_at is None
     ]
     total, start = 0, len(messages)
     for index in range(len(messages) - 1, -1, -1):
@@ -76,6 +77,29 @@ def to_messages(history: list[ChatMessage]) -> list[Message]:
         if message["role"] == "user" and all(b["type"] == "text" for b in message["content"]):
             start = index
     return messages[start:]
+
+
+def _user_edits(store: ShowStore, history: list[ChatMessage], turn_job_id: str) -> list[str]:
+    """Revisions made by hand since the previous turn ended.
+
+    The model remembers its own program from the history; without this it "corrects" the
+    user's edits back to what it said before.
+    """
+    ends = [
+        m.revision_after
+        for m in history
+        if m.revision_after is not None
+        and m.turn_job_id != turn_job_id
+        and m.rolled_back_at is None
+    ]
+    if not ends:
+        return []
+    since = max(ends)
+    return [
+        info.message
+        for info in store.history()
+        if info.revision > since and info.author != "assistant"
+    ]
 
 
 class _TextBuffer:
@@ -123,7 +147,9 @@ class Agent:
         ctx = ToolContext(self.service, store, self.chat, show_id)
         result = TurnResult(before, before, 0, 0, 0)
         failures = 0
-        messages = to_messages(self.chat.history(show_id))
+        history = self.chat.history(show_id)
+        messages = to_messages(history)
+        edits = _user_edits(store, history, turn_job_id)
         if not messages or messages[-1]["role"] != "user":
             raise LLMError("нет сообщения пользователя для ответа")
 
@@ -136,7 +162,7 @@ class Agent:
         while result.steps < MAX_STEPS:
             result.steps += 1
             emit("status", {"stage": "thinking", "step": result.steps})
-            request = [*messages[:-1], self._with_state(messages[-1], store)]
+            request = [*messages[:-1], self._with_state(messages[-1], store, edits)]
             buffer = _TextBuffer(emit)
             try:
                 reply = self.llm.respond(self.system, request, self.tools, on_text=buffer.add)
@@ -204,9 +230,14 @@ class Agent:
         )
         return result
 
-    def _with_state(self, message: Message, store: ShowStore) -> Message:
+    def _with_state(self, message: Message, store: ShowStore, edits: list[str]) -> Message:
         """The user's message plus the show as it is now (for this request only)."""
         state = self.service.show_summary(store)
+        if edits:
+            state += (
+                "\nПользователь сам поменял после вашего прошлого ответа (это его решения,"
+                " не возвращайте их): " + "; ".join(edits)
+            )
         return {
             "role": message["role"],
             "content": [*message["content"], text_block(f"<шоу сейчас>\n{state}\n</шоу сейчас>")],

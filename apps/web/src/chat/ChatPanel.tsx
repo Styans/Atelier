@@ -155,7 +155,7 @@ export function ChatPanel() {
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {turns.length === 0 && !busy && <p className="text-sm text-muted-foreground">{t("chat.empty")}</p>}
         {turns.map((turn, index) => (
-          <div key={turn.id ?? `t${index}`} className="space-y-2">
+          <div key={turn.id ?? `t${index}`} className={cn("space-y-2", turn.rolledBack && "opacity-50")}>
             {turn.items.map((item) =>
               item.kind === "user" ? (
                 <div key={item.key} className="ml-6 whitespace-pre-wrap rounded-lg bg-accent px-3 py-2 text-sm">
@@ -186,6 +186,7 @@ export function ChatPanel() {
                 <RotateCcw className="h-3 w-3" /> {t("chat.rollback")}
               </Button>
             )}
+            {turn.rolledBack && <p className="text-xs text-muted-foreground">{t("chat.rolledBack")}</p>}
           </div>
         ))}
         {streaming && (

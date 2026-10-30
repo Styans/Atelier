@@ -19,7 +19,7 @@ from sqlalchemy import UniqueConstraint, literal_column, text
 from sqlalchemy.engine import Engine
 from sqlmodel import Field, Session, SQLModel, col, select
 
-from atelier_jobs.queue import JobQueue
+from atelier_jobs.queue import JobQueue, add_column
 
 ROLES = ("user", "assistant", "notice")
 BLOCK_TYPES = ("text", "tool_use", "tool_result")
@@ -40,6 +40,7 @@ class ChatMessage(SQLModel, table=True):
     revision_before: int | None = None  # what a rollback of this answer returns to
     revision_after: int | None = None
     created_at: float = Field(default_factory=time.time)
+    rolled_back_at: float | None = None  # the user undid this turn; the model no longer sees it
 
     def blocks(self) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], json.loads(self.content))
@@ -94,6 +95,7 @@ class ChatStore:
     def __init__(self, source: JobQueue | Engine) -> None:
         self.engine: Engine = source.engine if isinstance(source, JobQueue) else source
         SQLModel.metadata.create_all(self.engine, tables=_TABLES)
+        add_column(self.engine, "chat_messages", "rolled_back_at", "REAL")
 
     @contextmanager
     def session(self) -> Iterator[Session]:
@@ -163,6 +165,18 @@ class ChatStore:
             message.revision_after = revision
             session.add(message)
             session.commit()
+
+    def mark_rolled_back(self, show_id: str, turn_job_id: str) -> int:
+        """Mark the messages of a rolled-back turn, the user's request too; returns how many."""
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                text(
+                    "UPDATE chat_messages SET rolled_back_at=:now WHERE show_id=:show_id "
+                    "AND turn_job_id=:turn AND rolled_back_at IS NULL"
+                ),
+                {"now": time.time(), "show_id": show_id, "turn": turn_job_id},
+            )
+            return int(result.rowcount)
 
     # --- turn events ---
 

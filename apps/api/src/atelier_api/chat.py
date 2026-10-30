@@ -136,6 +136,7 @@ def chat_router(
         if not befores:
             raise HTTPException(404, f"turn {turn!r} changed nothing that can be rolled back")
         show = store.rollback(min(befores), author=svc.author)
+        chat.mark_rolled_back(show_id, turn)
         return view(store, show)
 
     @router.post("/api/shows/{show_id}/proposals/{proposal_id}/{decision}")

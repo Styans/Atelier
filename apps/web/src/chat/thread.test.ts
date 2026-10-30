@@ -15,6 +15,7 @@ const msg = (role: ChatMessage["role"], content: ChatMessage["content"], turn: s
   revision_before: role === "user" ? null : before,
   revision_after: after,
   created_at: id,
+  rolled_back_at: null,
 });
 
 describe("buildTurns", () => {
@@ -33,6 +34,14 @@ describe("buildTurns", () => {
     expect([turns[0].revisionBefore, turns[0].revisionAfter]).toEqual([3, 5]);
     expect(canRollback(turns[0])).toBe(true);
     expect(canRollback(turns[1])).toBe(false);
+  });
+
+  it("does not offer to roll back a turn twice", () => {
+    const answer = { ...msg("assistant", [{ type: "text", text: "ok" }], "j3", 3, 5), rolled_back_at: 10 };
+    const [turn] = buildTurns([answer]);
+
+    expect(turn.rolledBack).toBe(true);
+    expect(canRollback(turn)).toBe(false);
   });
 });
 

@@ -106,7 +106,7 @@ class JobQueue:
         )
         event.listen(self.engine, "connect", _sqlite_pragmas)
         SQLModel.metadata.create_all(self.engine)
-        _add_priority_column(self.engine)
+        add_column(self.engine, "jobs", "priority", "INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def session(self) -> Iterator[Session]:
@@ -246,14 +246,14 @@ def _sqlite_pragmas(dbapi_connection: Any, _record: Any) -> None:
     cursor.close()
 
 
-def _add_priority_column(engine: Engine) -> None:
-    """``create_all`` never alters a table, so a database made before ``priority`` gets it here."""
+def add_column(engine: Engine, table: str, column: str, declaration: str) -> None:
+    """``create_all`` never alters a table, so a database made before a column gets it here."""
     with engine.begin() as conn:
-        columns = {row[1] for row in conn.execute(text("PRAGMA table_info(jobs)"))}
-        if "priority" in columns:
+        columns = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+        if column in columns:
             return
         try:
-            conn.execute(text("ALTER TABLE jobs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0"))
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}"))
         except OperationalError as error:
             # The API and the worker start together; the other one may have just added it.
             if "duplicate column" not in str(error):

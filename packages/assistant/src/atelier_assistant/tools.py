@@ -104,8 +104,10 @@ class CardChange(Args):
     target_height_m: float | None = Field(None, gt=1, le=500)
 
 
-class NoArgs(Args):
-    pass
+class FitArgs(Args):
+    duration_s: float | None = Field(
+        None, gt=30, le=3600, description="новая длительность шоу, если пользователь её назвал"
+    )
 
 
 Action = Literal[
@@ -282,7 +284,11 @@ def update_model_card(ctx: ToolContext, args: CardChange) -> str:
     return f"карточка {args.model_id} изменена: {', '.join(sorted(changes))}"
 
 
-def fit_to_budget(ctx: ToolContext, args: NoArgs) -> str:
+def fit_to_budget(ctx: ToolContext, args: FitArgs) -> str:
+    # The duration rides along: a small model asked to "shorten to 3 minutes" tends to fit
+    # the old budget and forget update_brief.
+    if args.duration_s is not None:
+        ctx.service.update_brief(ctx.store, {"duration_s": args.duration_s})
     show, fit = ctx.service.fit_program(ctx.store)
     ours = ctx.program == [(s.id, s.model_id) for s in show.program]
     return _fit_text(fit, REMOVE_BY_PROGRAM if ours else REMOVE_BY_PROPOSAL)
@@ -341,8 +347,9 @@ TOOLS: list[Tool] = [
     Tool("update_model_card", "Изменить карточку фигуры по её id.", CardChange, update_model_card),
     Tool(
         "fit_to_budget",
-        "Подогнать удержания текущей программы под длительность брифа.",
-        NoArgs,
+        "Подогнать удержания текущей программы под длительность брифа; с duration_s — сначала"
+        " поменять длительность.",
+        FitArgs,
         fit_to_budget,
     ),
     Tool(

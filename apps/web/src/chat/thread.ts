@@ -21,6 +21,7 @@ export interface Turn {
   items: Item[];
   revisionBefore: number | null;
   revisionAfter: number | null;
+  rolledBack: boolean;
 }
 
 const textOf = (message: ChatMessage) =>
@@ -38,9 +39,10 @@ export function buildTurns(messages: ChatMessage[]): Turn[] {
     // The user's own words open a turn; the assistant's messages of the same job follow it.
     const opens = message.role === "user" && textOf(message) !== "";
     if (!turn || opens || turn.id !== message.turn_job_id) {
-      turn = { id: message.turn_job_id, items: [], revisionBefore: null, revisionAfter: null };
+      turn = { id: message.turn_job_id, items: [], revisionBefore: null, revisionAfter: null, rolledBack: false };
       turns.push(turn);
     }
+    if (message.rolled_back_at !== null) turn.rolledBack = true;
     turn.revisionBefore ??= message.revision_before;
     if (message.revision_after !== null) turn.revisionAfter = message.revision_after;
     const key = `m${message.id}`;
@@ -70,6 +72,7 @@ export function buildTurns(messages: ChatMessage[]): Turn[] {
 export function canRollback(turn: Turn): boolean {
   return (
     turn.id !== null &&
+    !turn.rolledBack &&
     turn.revisionBefore !== null &&
     turn.revisionAfter !== null &&
     turn.revisionAfter > turn.revisionBefore

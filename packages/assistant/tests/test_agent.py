@@ -42,13 +42,16 @@ class Turn:
     def __init__(self, service: ShowService, chat: ChatStore, store: ShowStore) -> None:
         self.service, self.chat, self.store = service, chat, store
         self.events: list[tuple[str, dict[str, Any]]] = []
+        self.turns = 0
 
     def run(self, message: str, replies: list[Any]) -> tuple[Any, ScriptedClient]:
         show_id = self.store.load().id
-        self.chat.append(show_id, "user", [text_block(message)], turn_job_id="j_1")
+        self.turns += 1
+        job_id = f"j_{self.turns}"
+        self.chat.append(show_id, "user", [text_block(message)], turn_job_id=job_id)
         llm = ScriptedClient(replies)
         result = Agent(llm, self.service, self.chat).run_turn(
-            self.store, show_id, "j_1", lambda kind, data: self.events.append((kind, data))
+            self.store, show_id, job_id, lambda kind, data: self.events.append((kind, data))
         )
         return result, llm
 
@@ -168,6 +171,27 @@ def test_the_same_proposal_is_shown_once(turn: Turn) -> None:
     assert "уже ждёт решения" in llm.requests[2].messages[-1]["content"][0]["content"]
 
 
+def test_the_model_is_told_what_the_user_changed_by_hand(turn: Turn) -> None:
+    turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
+    turn.service.update_scene(turn.store, "s_4", {"title": "Офис"})  # author "cli", by hand
+
+    _, llm = turn.run("как называется четвёртая сцена?", [answer("«Офис»")])
+
+    state = llm.requests[0].messages[-1]["content"][-1]["text"]
+    assert "Пользователь сам поменял" in state and "Scene s_4: title" in state
+    _, llm = turn.run("спасибо", [answer("пожалуйста")])
+    assert "Пользователь сам поменял" not in llm.requests[0].messages[-1]["content"][-1]["text"]
+
+
+def test_a_new_duration_is_fitted_in_one_call(turn: Turn) -> None:
+    turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
+
+    turn.run("сократи до 4 минут", [calls(("fit_to_budget", {"duration_s": 240})), answer("ok")])
+
+    assert turn.store.load().brief.duration_s == 240
+    assert 230 < turn.service.estimate_timeline(turn.store).total_s <= 240
+
+
 def test_expensive_actions_are_proposals(turn: Turn) -> None:
     turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
     model_id = turn.store.load().program[0].model_id
@@ -199,6 +223,17 @@ def test_the_turn_has_a_step_limit(turn: Turn) -> None:
     result, _ = turn.run("ещё", [loop] * MAX_STEPS)
 
     assert result.steps == MAX_STEPS and result.stopped and "шагов" in result.stopped
+
+
+def test_a_rolled_back_turn_is_not_remembered(turn: Turn) -> None:
+    first, _ = turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
+    turn.store.rollback(first.revision_before, author="ui")
+    turn.chat.mark_rolled_back(turn.store.load().id, "j_1")
+
+    _, llm = turn.run("сделай программу", [answer("сейчас")])
+
+    sent = llm.requests[0].messages
+    assert len(sent) == 1 and sent[0]["content"][0]["text"] == "сделай программу"
 
 
 def test_history_is_cut_between_turns_never_inside_one(chat: ChatStore) -> None:
