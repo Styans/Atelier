@@ -196,6 +196,16 @@ def test_the_users_hand_edits_are_not_undone(turn: Turn) -> None:
     assert turn.store.load().program[3].title == "Сцена 4"  # asked for in so many words
 
 
+def test_a_figure_added_again_reuses_its_card(turn: Turn) -> None:
+    turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
+    again = {"title": "Финал", "hold_s": 10, "figure": figure(1)}
+
+    turn.run("повтори первую фигуру в конце", [calls(("add_scene", again)), answer("ok")])
+
+    show = turn.store.load()
+    assert len(show.models) == 6 and show.program[-1].model_id == show.program[0].model_id
+
+
 def test_a_new_duration_is_fitted_in_one_call(turn: Turn) -> None:
     turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
 

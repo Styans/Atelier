@@ -251,7 +251,15 @@ def add_scene(ctx: ToolContext, args: SceneArgs) -> str:
         figure = _figure(args.figure)
         if figure is None:
             raise ToolFailure("нужна новая figure или существующий model_id")
-        _, model_id = ctx.service.create_model(ctx.store, **figure.model_dump(exclude_none=True))
+        # A figure shown again ("the logo, as at the start") is the same card, as in a program.
+        name = figure.name.strip().casefold()
+        same = [i for i, c in ctx.store.load().models.items() if c.name.strip().casefold() == name]
+        if same:
+            model_id = same[0]
+        else:
+            _, model_id = ctx.service.create_model(
+                ctx.store, **figure.model_dump(exclude_none=True)
+            )
     scene = ctx.service.add_scene(ctx.store, model_id, hold_s=args.hold_s, title=args.title)
     return f"сцена {scene.id} добавлена в конец (модель {model_id})"
 
