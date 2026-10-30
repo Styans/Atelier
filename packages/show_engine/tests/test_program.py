@@ -11,12 +11,15 @@ from atelier_show_engine.program import (
 from atelier_show_engine.service import ServiceError, ShowService
 
 
-def timeline(budget: float, holds: dict[str, float], transition: float = 10.0) -> TimelineEstimate:
+def timeline(
+    budget: float, holds: dict[str, float], transition: float = 10.0, ascent: float | None = None
+) -> TimelineEstimate:
     segments, clock = [Segment("takeoff", None, "T", 0.0, 8.0, "exact")], 8.0
-    for scene_id, hold in holds.items():
-        segments.append(Segment("transition", scene_id, "", clock, transition, "proxy"))
-        segments.append(Segment("hold", scene_id, scene_id, clock + transition, hold, "exact"))
-        clock += transition + hold
+    for index, (scene_id, hold) in enumerate(holds.items()):
+        move = ascent if index == 0 and ascent is not None else transition
+        segments.append(Segment("transition", scene_id, "", clock, move, "proxy"))
+        segments.append(Segment("hold", scene_id, scene_id, clock + move, hold, "exact"))
+        clock += move + hold
     segments.append(Segment("transition", None, "Return", clock, 40.0, "proxy"))
     segments.append(Segment("landing", None, "L", clock + 40.0, 10.0, "exact"))
     return TimelineEstimate(segments, budget)
@@ -48,6 +51,14 @@ def test_too_many_scenes_for_the_budget_are_counted() -> None:
     assert not fit.fits and fit.excess_s == pytest.approx(218 - 120)
     assert fit.remove_scenes == 7  # 16 s freed per dropped scene: 98 s needs 7 of them
     assert set(fit.holds.values()) == {MIN_HOLD_S}
+
+
+def test_dropping_a_scene_never_frees_the_climb_to_the_first_one() -> None:
+    wished = {f"s_{i}": 15.0 for i in range(1, 7)}
+    fit = fit_holds(timeline(150, wished, ascent=43.0), wished)
+
+    # 8 + 43 + 5 x 10 + 6 x 6 + 50 = 187 s, 37 s over; a dropped scene frees 10 + 6 s, not 43
+    assert fit.excess_s == pytest.approx(37) and fit.remove_scenes == 3
 
 
 def test_a_short_program_stays_short_at_the_maximum() -> None:

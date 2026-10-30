@@ -86,14 +86,12 @@ def fit_holds(estimate: TimelineEstimate, desired: Mapping[str, float]) -> FitRe
     if available <= n * MIN_HOLD_S:
         holds = [MIN_HOLD_S] * n
         excess = fixed + sum(holds) - budget
-        transitions = sorted(
-            (
-                s.duration_s + MIN_HOLD_S
-                for s in estimate.segments
-                if s.kind == "transition" and s.scene_id is not None
-            ),
-            reverse=True,
-        )
+        into_scenes = [
+            s.duration_s for s in estimate.segments if s.kind == "transition" and s.scene_id
+        ]
+        # The climb to the first figure stays whichever scene comes first: dropping a scene
+        # frees one of the transitions between figures, never that one.
+        transitions = sorted((t + MIN_HOLD_S for t in into_scenes[1:]), reverse=True)
         removed, saved = 0, 0.0  # dropping the costliest scenes first frees the most time
         for cost in transitions:
             if saved >= excess:
