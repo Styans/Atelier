@@ -205,6 +205,18 @@ def test_a_new_duration_is_fitted_in_one_call(turn: Turn) -> None:
     assert 230 < turn.service.estimate_timeline(turn.store).total_s <= 240
 
 
+def test_the_code_says_when_a_turn_left_the_show_over_budget(turn: Turn) -> None:
+    turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
+
+    turn.run(
+        "сократи до 2 минут",
+        [calls(("fit_to_budget", {"duration_s": 120})), answer("Готово, ровно 2 минуты!")],
+    )
+
+    last = turn.chat.history(turn.store.load().id)[-1]
+    assert last.role == "notice" and "при бюджете 2:00: не укладывается" in last.blocks()[0]["text"]
+
+
 def test_expensive_actions_are_proposals(turn: Turn) -> None:
     turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
     model_id = turn.store.load().program[0].model_id

@@ -80,6 +80,11 @@ def to_messages(history: list[ChatMessage]) -> list[Message]:
     return messages[start:]
 
 
+def _clock(seconds: float) -> str:
+    whole = round(seconds)
+    return f"{whole // 60}:{whole % 60:02d}"
+
+
 def _previous_end(history: list[ChatMessage], turn_job_id: str) -> int | None:
     """The revision the previous (not rolled-back) turn left the show at."""
     ends = [
@@ -244,6 +249,24 @@ class Agent:
 
         result.proposals = ctx.proposals
         result.revision_after = store.current_revision()
+        if result.revision_after != before:
+            # The model's own summary of a turn is not to be trusted with numbers: the code
+            # says so when the show it left is over budget.
+            timeline = self.service.estimate_timeline(store)
+            if timeline.over_budget_s >= 1:
+                last_saved = self.chat.append(
+                    show_id,
+                    "notice",
+                    [
+                        text_block(
+                            f"По оценке кода шоу длится {_clock(timeline.total_s)} при бюджете"
+                            f" {_clock(timeline.budget_s)}: не укладывается на"
+                            f" {timeline.over_budget_s:.0f} с."
+                        )
+                    ],
+                    turn_job_id=turn_job_id,
+                    revision_before=before,
+                )
         if result.stopped:
             notice = self.chat.append(
                 show_id,
