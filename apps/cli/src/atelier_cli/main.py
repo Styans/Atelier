@@ -443,6 +443,61 @@ def worker() -> None:
     raise typer.Exit(worker_main())
 
 
+@app.command()
+def chat(
+    text: Annotated[str, typer.Argument(help="What to tell the assistant")],
+    show: ShowOption = None,
+) -> None:
+    """One assistant turn in this terminal: the same agent and history as the UI's chat."""
+    import uuid
+
+    from atelier_assistant.llm import LLMError, text_block
+    from atelier_assistant.runtime import AssistantRuntime
+    from atelier_jobs import ChatStore, JobQueue
+
+    with service() as svc:
+        store = open_show(svc, show)
+        show_id = store.load().id
+        queue = JobQueue(svc.config.cache_dir / "atelier.db")
+        busy = [j for j in queue.jobs(None, 20) if j.gpu and j.status == "running"]
+        if busy:
+            # The chat model and a GPU job do not fit on one card (ADR-035).
+            raise ServiceError(f"a GPU job is running ({busy[0].kind}); try when it has finished")
+        history = ChatStore(queue)
+        turn = f"cli_{uuid.uuid4().hex[:12]}"
+        history.append(show_id, "user", [text_block(text)], turn_job_id=turn)
+
+        def emit(kind: str, payload: dict[str, Any]) -> None:
+            if kind == "text":
+                console.print(payload["delta"], end="", markup=False, highlight=False)
+            elif kind == "tool_start":
+                console.print(f"\n[cyan]→ {payload['name']}[/cyan]")
+            elif kind == "tool_result":
+                colour = "red" if payload["is_error"] else "dim"
+                console.print(f"  [{colour}]{payload['text']}[/{colour}]", highlight=False)
+            elif kind == "status" and payload.get("stage") == "loading":
+                console.print("[dim]loading the model…[/dim]")
+
+        runtime = AssistantRuntime(svc.config)
+        try:
+            if not runtime.running():
+                emit("status", {"stage": "loading"})
+            result = runtime.agent(svc, history).run_turn(store, show_id, turn, emit)
+        except LLMError as exc:
+            raise ServiceError(str(exc)) from exc
+        finally:
+            runtime.close()
+        console.print()
+        if result.stopped:
+            console.print(f"[yellow]stopped:[/yellow] {result.stopped}")
+        console.print(
+            f"[dim]revisions {result.revision_before} → {result.revision_after}, "
+            f"{result.tool_calls} tool calls ({result.failures} failed), "
+            f"{len(result.proposals)} proposals; roll back: atelier rollback "
+            f"{result.revision_before}[/dim]"
+        )
+
+
 @scene_app.command("add")
 def scene_add(
     model: Annotated[str, typer.Option(help="Model id")],

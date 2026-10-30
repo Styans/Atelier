@@ -29,3 +29,11 @@ timeout_s = 1800
 python = 'C:\Users\Beacon\Repo\Pygmalion\runtime\venv\Scripts\python.exe'
 home = 'C:\Users\Beacon\Repo\Pygmalion\runtime'
 server_dir = 'C:\Users\Beacon\Repo\Pygmalion\server'
+
+# The chat assistant on a local model (ADR-034): llama-server and weights from Pygmalion's runtime.
+[assistant]
+idle_unload_s = 600  # free the video memory after this many seconds without chat turns
+
+[assistant.llama_server]
+exe = 'C:\Users\Beacon\Repo\Pygmalion\runtime\models\llamacpp\llama-server.exe'
+model = 'C:\Users\Beacon\Repo\Pygmalion\runtime\models\llm\qwen3-vl-8b\Qwen3VL-8B-Instruct-Q4_K_M.gguf'
