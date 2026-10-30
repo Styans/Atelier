@@ -746,6 +746,8 @@ class ShowService:
             raise ServiceError(f"scene fields that cannot be edited here: {sorted(unknown)}")
         show = store.load()
         index = _scene_index(show, scene_id)
+        if not changes:
+            return show  # an empty edit is not a revision
         try:
             scene = Scene.model_validate(show.program[index].model_dump(mode="json") | changes)
         except ValidationError as exc:

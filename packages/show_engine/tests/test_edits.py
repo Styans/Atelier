@@ -91,6 +91,9 @@ def test_scene_edit_and_reorder(service: ShowService, store: ShowStore) -> None:
         service.update_scene(
             store, "s_1", {"animation": {"tracks": [{"primitive": "builtin.nope"}]}}
         )
+    revision = store.current_revision()
+    service.update_scene(store, "s_1", {})
+    assert store.current_revision() == revision  # an empty edit is not a revision
 
 
 def test_revision_diff_is_readable(service: ShowService, store: ShowStore) -> None:
