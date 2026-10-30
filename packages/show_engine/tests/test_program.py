@@ -84,6 +84,17 @@ def test_apply_program_creates_cards_and_fits_holds(service: ShowService) -> Non
     assert len(show.program) == 1 and len(show.models) == 6  # cards stay, only scenes go
 
 
+def test_a_figure_shown_twice_is_one_card(service: ShowService) -> None:
+    store, _ = service.create_show("Юбилей", drones=36, duration_s=300)
+    names = ["Логотип", "Звезда", "логотип "]
+    drafts = [SceneDraft(title=n, hold_s=10, figure=FigureDraft(name=n)) for n in names]
+
+    show, _ = service.apply_program(store, drafts)
+
+    assert len(show.models) == 2
+    assert show.program[0].model_id == show.program[2].model_id
+
+
 def test_fit_program_follows_a_new_budget(service: ShowService) -> None:
     store, _ = service.create_show("Юбилей", drones=36, duration_s=240)
     drafts = [

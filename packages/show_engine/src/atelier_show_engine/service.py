@@ -907,16 +907,21 @@ class ShowService:
                 f"the show already has {len(show.program)} scenes; replacing them removes them"
             )
         scenes: list[Scene] = []
+        # A figure shown twice (the logo at the start and at the end) is one card.
+        made: dict[str, str] = {}
         for index, draft in enumerate(drafts, start=1):
             if draft.model_id is not None:
                 if draft.model_id not in show.models:
                     raise ServiceError(f"scene {index}: no model {draft.model_id!r}")
                 model_id = draft.model_id
             elif draft.figure is not None:
-                model_id = unique_id("m", draft.figure.name, show.models.keys())
-                show.models[model_id] = ModelCard(
-                    id=model_id, **draft.figure.model_dump(exclude_none=True)
-                )
+                key = " ".join(draft.figure.name.casefold().split())
+                if key not in made:
+                    made[key] = unique_id("m", draft.figure.name, show.models.keys())
+                    show.models[made[key]] = ModelCard(
+                        id=made[key], **draft.figure.model_dump(exclude_none=True)
+                    )
+                model_id = made[key]
             else:
                 raise ServiceError(f"scene {index}: give a new figure or an existing model_id")
             scenes.append(
