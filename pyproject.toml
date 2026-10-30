@@ -75,7 +75,7 @@ ignore = ["N818", "UP046", "UP047"]
 # Messages for the user and the assistant are Russian on purpose: Cyrillic letters
 # and the en dash in them are not look-alikes of Latin ones.
 allowed-confusables = [
-    "а", "в", "е", "к", "м", "н", "о", "р", "с", "т", "у", "х",
+    "а", "в", "г", "е", "к", "м", "н", "о", "р", "с", "т", "у", "х",
     "А", "В", "Е", "К", "М", "Н", "О", "Р", "С", "Т", "Х", "–",
 ]
 

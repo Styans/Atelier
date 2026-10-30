@@ -63,7 +63,7 @@ def test_one_phrase_gives_a_brief_and_a_fitted_program(turn: Turn) -> None:
     brief = {
         "occasion": "35-летие компании",
         "duration_s": 240,
-        "viewer_direction": "-Y",
+        "audience_side": "север",
         "palette": ["#ffb300", "#ff6f00"],
         "mood": "тёплое, праздничное",
     }
@@ -74,6 +74,7 @@ def test_one_phrase_gives_a_brief_and_a_fitted_program(turn: Turn) -> None:
 
     show = turn.store.load()
     assert show.brief.occasion == "35-летие компании" and show.brief.duration_s == 240
+    assert show.brief.viewer_direction == "+Y"  # "север" mapped by the code, not the model
     assert len(show.program) == 8 and len(show.models) == 8
     assert all(card.image_prompt for card in show.models.values())
     assert turn.service.estimate_timeline(turn.store).total_s <= 240
@@ -134,7 +135,7 @@ def test_a_program_too_long_is_replaced_by_the_model_itself(turn: Turn) -> None:
     )
 
     first = llm.requests[1].messages[-1]["content"][0]["content"]
-    assert "не помещается" in first and "уберите" in first
+    assert "не помещается" in first and "propose_program снова" in first
     show = turn.store.load()
     assert len(show.program) == 6 and len(show.models) == 6  # cards of the first try are gone
     assert not result.proposals
@@ -152,7 +153,19 @@ def test_the_users_program_is_only_replaced_by_a_click(turn: Turn) -> None:
     (proposal,) = turn.chat.proposals(before.id)
     assert proposal.action == "replace_program" and len(proposal.public()["args"]["scenes"]) == 7
     assert result.proposals == [proposal.id]
-    assert "ждёт подтверждения" in llm.requests[1].messages[-1]["content"][0]["content"]
+    assert "предложение показано" in llm.requests[1].messages[-1]["content"][0]["content"]
+
+
+def test_the_same_proposal_is_shown_once(turn: Turn) -> None:
+    turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
+    remove = {"action": "remove_scene", "target_id": "s_4", "reason": "лишняя сцена"}
+    result, llm = turn.run(
+        "убери четвёртую",
+        [calls(("propose_action", remove)), calls(("propose_action", remove)), answer("ok")],
+    )
+
+    assert len(turn.chat.proposals(turn.store.load().id)) == 1 and len(result.proposals) == 1
+    assert "уже ждёт решения" in llm.requests[2].messages[-1]["content"][0]["content"]
 
 
 def test_expensive_actions_are_proposals(turn: Turn) -> None:

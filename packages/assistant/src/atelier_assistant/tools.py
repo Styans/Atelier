@@ -26,6 +26,8 @@ from atelier_show_engine.service import ServiceError, ShowService
 from atelier_show_engine.store import ShowStore
 
 MIN_PROGRAM, MAX_PROGRAM = 6, 12
+# Where the audience stands -> Brief.viewer_direction (Z-up, north is +Y).
+AUDIENCE_SIDES = {"юг": "-Y", "север": "+Y", "запад": "-X", "восток": "+X"}
 
 
 class Args(BaseModel):
@@ -37,8 +39,9 @@ class BriefArgs(Args):
     occasion: str | None = Field(None, max_length=200)
     date: dt.date | None = Field(None, description="YYYY-MM-DD")
     location: str | None = Field(None, max_length=200)
-    viewer_direction: Literal["-Y", "+Y", "-X", "+X"] | None = Field(
-        None, description="-Y юг, +Y север, -X запад, +X восток"
+    # A word, not an axis: the code maps it (the model got "север" -> "-Y" wrong).
+    audience_side: Literal["юг", "север", "запад", "восток"] | None = Field(
+        None, description="с какой стороны стоят зрители"
     )
     duration_s: float | None = Field(None, gt=30, le=3600)
     drone_count: int | None = Field(None, gt=0, le=5000)
@@ -77,11 +80,12 @@ class SceneArgs(Args):
 
 
 class SceneChange(Args):
+    # No transition length here: the code computes the safe one from the fleet's limits, and
+    # a small model "saved time" by setting it to zero.
     scene_id: str
     title: str | None = Field(None, max_length=80)
     hold_s: float | None = Field(None, gt=0, le=120)
-    model_id: str | None = None
-    transition_s: float | None = Field(None, gt=0, le=300, description="пусто = минимальный")
+    model_id: str | None = Field(None, description="другая карточка для этой сцены")
     rotation_deg: tuple[float, float, float] | None = None
 
 
@@ -160,12 +164,20 @@ def _figure(args: FigureArgs | None) -> FigureDraft | None:
     )
 
 
-def _fit_text(fit: FitResult) -> str:
+REMOVE_BY_PROGRAM = "вызовите propose_program снова, на {n} сцен(ы) меньше"
+REMOVE_BY_PROPOSAL = (
+    "предложите пользователю убрать {n} сцен(ы): propose_action с action=remove_scene и"
+    " target_id сцены — выберите наименее важные; или спросите, можно ли увеличить длительность"
+)
+
+
+def _fit_text(fit: FitResult, remove_how: str = REMOVE_BY_PROGRAM) -> str:
     total = f"оценка шоу {fit.total_s:.0f} с из {fit.budget_s:.0f} с"
     if not fit.fits:
         return (
-            f"{total}: не помещается даже при минимальных удержаниях, лишних {fit.excess_s:.0f} с;"
-            f" уберите {fit.remove_scenes} сцен(ы) или попросите увеличить длительность"
+            f"{total}: не помещается даже при минимальных удержаниях (лишних"
+            f" {fit.excess_s:.0f} с: переходы между фигурами занимают десятки секунд). Чтобы"
+            f" уложиться, {remove_how.format(n=fit.remove_scenes)}"
         )
     holds = ", ".join(f"{scene}: {hold:g} с" for scene, hold in fit.holds.items())
     slack = f"; короче бюджета на {fit.slack_s:.0f} с" if fit.slack_s > 0 else ""
@@ -174,6 +186,9 @@ def _fit_text(fit: FitResult) -> str:
 
 def update_brief(ctx: ToolContext, args: BriefArgs) -> str:
     changes = args.model_dump(exclude_none=True)
+    side = changes.pop("audience_side", None)
+    if side is not None:
+        changes["viewer_direction"] = AUDIENCE_SIDES[side]
     drones = changes.pop("drone_count", None)
     if drones is not None:
         ctx.service.set_fleet(ctx.store, drone_count=drones)
@@ -197,17 +212,13 @@ def propose_program(ctx: ToolContext, args: ProgramArgs) -> str:
     ours = ctx.program == [(s.id, s.model_id) for s in show.program]
     if show.program and not ours:
         # Replacing the user's program removes scenes: only with their click.
-        proposal = ctx.chat.add_proposal(
-            ctx.show_id,
+        done = _propose(
+            ctx,
             "replace_program",
             {"scenes": [d.model_dump(mode="json") for d in drafts]},
-            summary=f"Заменить программу ({len(show.program)} сцен) новой из {len(drafts)} сцен",
+            f"Заменить программу ({len(show.program)} сцен) новой из {len(drafts)} сцен",
         )
-        ctx.proposals.append(proposal.id)
-        return (
-            f"в шоу уже есть программа из {len(show.program)} сцен: замена ждёт подтверждения"
-            " пользователя (кнопка «Применить» в чате)"
-        )
+        return f"в шоу уже есть программа из {len(show.program)} сцен; {done}"
     before = set(show.models)
     shown, fit = ctx.service.apply_program(
         ctx.store, drafts, replace=True, message=f"Assistant: program of {len(drafts)} scenes"
@@ -218,7 +229,15 @@ def propose_program(ctx: ToolContext, args: ProgramArgs) -> str:
     ctx.created_cards = (ctx.created_cards & used) | (set(shown.models) - before)
     ctx.program = [(s.id, s.model_id) for s in shown.program]
     ids = ", ".join(f"{s.id}→{s.model_id}" for s in shown.program)
-    return f"программа применена ({len(drafts)} сцен: {ids}); {_fit_text(fit)}"
+    text = f"программа применена ({len(drafts)} сцен: {ids}); {_fit_text(fit)}"
+    repeats = len(shown.program) - len({s.model_id for s in shown.program})
+    if repeats > len(shown.program) // 4:
+        # Padding the program with the same figures is the usual failure of a small model.
+        text += (
+            f". Внимание: {repeats} сцен повторяют уже показанные фигуры; если это не задумано"
+            " (логотип в начале и в конце — задумано), замените их новыми идеями"
+        )
+    return text
 
 
 def add_scene(ctx: ToolContext, args: SceneArgs) -> str:
@@ -233,11 +252,12 @@ def add_scene(ctx: ToolContext, args: SceneArgs) -> str:
 
 
 def update_scene(ctx: ToolContext, args: SceneChange) -> str:
-    changes = args.model_dump(exclude_none=True, exclude={"scene_id", "transition_s"})
-    if args.transition_s is not None:
-        changes["transition_in"] = {"duration_s": args.transition_s}
+    changes = args.model_dump(exclude_none=True, exclude={"scene_id"})
     if not changes:
-        raise ToolFailure("ничего не передано для изменения сцены")
+        raise ToolFailure(
+            "ничего не передано для изменения сцены: укажите title, hold_s, model_id или"
+            " rotation_deg (длительность перехода считает код, её не задают)"
+        )
     ctx.service.update_scene(ctx.store, args.scene_id, changes)
     return f"сцена {args.scene_id} изменена: {', '.join(sorted(changes))}"
 
@@ -263,8 +283,9 @@ def update_model_card(ctx: ToolContext, args: CardChange) -> str:
 
 
 def fit_to_budget(ctx: ToolContext, args: NoArgs) -> str:
-    _, fit = ctx.service.fit_program(ctx.store)
-    return _fit_text(fit)
+    show, fit = ctx.service.fit_program(ctx.store)
+    ours = ctx.program == [(s.id, s.model_id) for s in show.program]
+    return _fit_text(fit, REMOVE_BY_PROGRAM if ours else REMOVE_BY_PROPOSAL)
 
 
 def propose_action(ctx: ToolContext, args: ActionArgs) -> str:
@@ -277,14 +298,26 @@ def propose_action(ctx: ToolContext, args: ActionArgs) -> str:
         raise ToolFailure(f"нет модели {args.target_id!r}; для этого действия нужен её id")
     if args.action == "generate_images" and not args.prompt:
         raise ToolFailure("для generate_images нужен prompt (по-английски)")
-    proposal = ctx.chat.add_proposal(
-        ctx.show_id,
-        args.action,
-        {"target_id": args.target_id, "prompt": args.prompt},
-        summary=args.reason,
+    return _propose(
+        ctx, args.action, {"target_id": args.target_id, "prompt": args.prompt}, args.reason
     )
+
+
+def _propose(ctx: ToolContext, action: str, args: dict[str, Any], summary: str) -> str:
+    """A proposal card in the chat; the same pending proposal is never shown twice."""
+    for pending in ctx.chat.proposals(ctx.show_id, status="pending"):
+        if pending.action == action and pending.public()["args"] == args:
+            # A small model otherwise "retries" the same proposal until the step limit.
+            return (
+                f"это предложение уже ждёт решения пользователя ({pending.id}); не повторяйте"
+                " его — закончите ход ответом пользователю"
+            )
+    proposal = ctx.chat.add_proposal(ctx.show_id, action, args, summary=summary)
     ctx.proposals.append(proposal.id)
-    return "предложение показано пользователю; выполнится, только если он нажмёт «Применить»"
+    return (
+        "предложение показано пользователю; выполнится, только если он нажмёт «Применить»."
+        " Больше его не вызывайте"
+    )
 
 
 TOOLS: list[Tool] = [
