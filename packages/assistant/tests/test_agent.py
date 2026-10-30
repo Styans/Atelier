@@ -183,6 +183,19 @@ def test_the_model_is_told_what_the_user_changed_by_hand(turn: Turn) -> None:
     assert "Пользователь сам поменял" not in llm.requests[0].messages[-1]["content"][-1]["text"]
 
 
+def test_the_users_hand_edits_are_not_undone(turn: Turn) -> None:
+    turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
+    turn.service.update_scene(turn.store, "s_4", {"title": "Офис", "hold_s": 20})
+    back = {"scene_id": "s_4", "title": "Сцена 4", "hold_s": 6}
+
+    _, llm = turn.run("сократи шоу", [calls(("update_scene", back)), answer("ok")])
+
+    assert llm.requests[1].messages[-1]["content"][0]["is_error"]
+    assert turn.store.load().program[3].title == "Офис"
+    turn.run("назови четвёртую сцену «Сцена 4»", [calls(("update_scene", back)), answer("ok")])
+    assert turn.store.load().program[3].title == "Сцена 4"  # asked for in so many words
+
+
 def test_a_new_duration_is_fitted_in_one_call(turn: Turn) -> None:
     turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
 

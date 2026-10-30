@@ -27,6 +27,7 @@ from atelier_assistant.llm import (
     tool_result_block,
 )
 from atelier_assistant.tools import TOOLS, ToolContext, run_tool
+from atelier_domain import Show
 from atelier_jobs import ChatStore
 from atelier_jobs.chat import ChatMessage
 from atelier_show_engine.service import ShowService
@@ -79,12 +80,8 @@ def to_messages(history: list[ChatMessage]) -> list[Message]:
     return messages[start:]
 
 
-def _user_edits(store: ShowStore, history: list[ChatMessage], turn_job_id: str) -> list[str]:
-    """Revisions made by hand since the previous turn ended.
-
-    The model remembers its own program from the history; without this it "corrects" the
-    user's edits back to what it said before.
-    """
+def _previous_end(history: list[ChatMessage], turn_job_id: str) -> int | None:
+    """The revision the previous (not rolled-back) turn left the show at."""
     ends = [
         m.revision_after
         for m in history
@@ -92,14 +89,44 @@ def _user_edits(store: ShowStore, history: list[ChatMessage], turn_job_id: str) 
         and m.turn_job_id != turn_job_id
         and m.rolled_back_at is None
     ]
-    if not ends:
+    return max(ends) if ends else None
+
+
+def _user_edits(store: ShowStore, since: int | None) -> list[str]:
+    """Revisions made by hand since the previous turn ended.
+
+    The model remembers its own program from the history; without this it "corrects" the
+    user's edits back to what it said before.
+    """
+    if since is None:
         return []
-    since = max(ends)
     return [
         info.message
         for info in store.history()
         if info.revision > since and info.author != "assistant"
     ]
+
+
+def _hand_changed(store: ShowStore, since: int | None) -> dict[str, dict[str, Any]]:
+    """Scene and card fields that differ from where the previous turn left them: id → field →
+    value now. Only people edit between turns, so every difference is theirs."""
+    if since is None or since >= store.current_revision():
+        return {}
+    then, now = store.load_revision(since), store.load()
+
+    def dumped(show: Show) -> dict[str, dict[str, Any]]:
+        items = {s.id: s.model_dump(mode="json") for s in show.program}
+        return items | {i: m.model_dump(mode="json") for i, m in show.models.items()}
+
+    old = dumped(then)
+    changed: dict[str, dict[str, Any]] = {}
+    for item_id, after in dumped(now).items():
+        before = old.get(item_id)
+        if before is not None:
+            fields = {k: v for k, v in after.items() if before.get(k) != v}
+            if fields:
+                changed[item_id] = fields
+    return changed
 
 
 class _TextBuffer:
@@ -144,14 +171,23 @@ class Agent:
 
     def run_turn(self, store: ShowStore, show_id: str, turn_job_id: str, emit: Emit) -> TurnResult:
         before = store.current_revision()
-        ctx = ToolContext(self.service, store, self.chat, show_id)
         result = TurnResult(before, before, 0, 0, 0)
         failures = 0
         history = self.chat.history(show_id)
         messages = to_messages(history)
-        edits = _user_edits(store, history, turn_job_id)
         if not messages or messages[-1]["role"] != "user":
             raise LLMError("нет сообщения пользователя для ответа")
+        since = _previous_end(history, turn_job_id)
+        edits = _user_edits(store, since)
+        request_text = " ".join(b["text"] for b in messages[-1]["content"] if b["type"] == "text")
+        ctx = ToolContext(
+            self.service,
+            store,
+            self.chat,
+            show_id,
+            request=request_text,
+            hand_changed=_hand_changed(store, since),
+        )
 
         def save(role: str, content: list[dict[str, Any]]) -> ChatMessage:
             return self.chat.append(

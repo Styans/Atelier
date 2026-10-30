@@ -133,6 +133,9 @@ class ToolContext:
     program: list[tuple[str, str]] | None = None  # (scene id, model id) as this turn left it
     created_cards: set[str] = field(default_factory=set)
     proposals: list[str] = field(default_factory=list)
+    request: str = ""  # the user's message this turn answers
+    # Fields people changed by hand since the previous answer: id → field → value now.
+    hand_changed: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 class ToolFailure(Exception):
@@ -253,6 +256,28 @@ def add_scene(ctx: ToolContext, args: SceneArgs) -> str:
     return f"сцена {scene.id} добавлена в конец (модель {model_id})"
 
 
+def _keep_hand_edits(ctx: ToolContext, target_id: str, changes: dict[str, Any]) -> None:
+    """The user's own edits since the previous answer stay unless this message asks again.
+
+    A small model "restores" the names it gave in its earlier answer; the prompt alone does
+    not stop it. Holds are free: fitting the budget rescales them anyway.
+    """
+    mine = ctx.hand_changed.get(target_id, {})
+    request = ctx.request.casefold()
+    undone = [
+        f"{name} = {mine[name]!r}"
+        for name, value in changes.items()
+        if name in mine and name != "hold_s" and value != mine[name]
+        if not (isinstance(value, str) and value.strip().casefold() in request)
+    ]
+    if undone:
+        raise ToolFailure(
+            f"пользователь сам поменял у {target_id} после вашего прошлого ответа: "
+            f"{', '.join(undone)}. Это его решение — не меняйте эти поля, если он не просит"
+            " этого в последнем сообщении; остальное сделайте без них"
+        )
+
+
 def update_scene(ctx: ToolContext, args: SceneChange) -> str:
     changes = args.model_dump(exclude_none=True, exclude={"scene_id"})
     if not changes:
@@ -260,6 +285,7 @@ def update_scene(ctx: ToolContext, args: SceneChange) -> str:
             "ничего не передано для изменения сцены: укажите title, hold_s, model_id или"
             " rotation_deg (длительность перехода считает код, её не задают)"
         )
+    _keep_hand_edits(ctx, args.scene_id, changes)
     ctx.service.update_scene(ctx.store, args.scene_id, changes)
     return f"сцена {args.scene_id} изменена: {', '.join(sorted(changes))}"
 
@@ -280,6 +306,7 @@ def update_model_card(ctx: ToolContext, args: CardChange) -> str:
     changes = args.model_dump(exclude_none=True, exclude={"model_id"})
     if not changes:
         raise ToolFailure("ничего не передано для изменения карточки")
+    _keep_hand_edits(ctx, args.model_id, changes)
     ctx.service.update_model(ctx.store, args.model_id, changes)
     return f"карточка {args.model_id} изменена: {', '.join(sorted(changes))}"
 
