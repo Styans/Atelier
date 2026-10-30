@@ -1,6 +1,6 @@
 # Архитектура Atelier
 
-Статус: фазы 1 (сквозной путь) и 2 (API, очередь, worker, веб-UI, Pygmalion) реализованы. Разделы с
+Статус: фазы 1 (сквозной путь), 2 (API, очередь, worker, веб-UI, Pygmalion) и 3 (ассистент) реализованы. Разделы с
 пометкой «(фаза N)» для N ≥ 3 — согласованный дизайн, ещё не реализованный. Решения и обоснования — `docs/DECISIONS.md`; требования — `docs/SPEC.md`.
 
 ## Схема
@@ -13,7 +13,9 @@ flowchart LR
   API -->|дорогие действия| DB[(.atelier/atelier.db<br/>jobs, shows)]
   WRK[apps/worker] -->|забирает по одной| DB
   WRK --> SVC
-  API --> LLM[Assistant<br/>Claude API, tool use<br/>фаза 3]
+  WRK --> AST[atelier_assistant<br/>ход чата, инструменты]
+  AST --> LLM[llama-server<br/>локальная LLM]
+  AST --> SVC
   SVC --> ENG[compiler, provenance,<br/>store]
   ENG --> HOST[plugin_host<br/>registry, runners]
   HOST -->|inprocess| PIN[plugins: pointille,<br/>builtin_*, blender_skybrush]
@@ -34,9 +36,10 @@ flowchart LR
 | `packages/plugin_host` | `atelier_plugin_host` | discovery, реестр, health-check, inprocess/subprocess раннеры, кэш компонентов, union-схемы | domain, plugin_sdk |
 | `packages/show_engine` | `atelier_show_engine` | config, store (ревизии), provenance (stale), importing, geometry, compiler, `ShowService` | domain, plugin_sdk, plugin_host |
 | `packages/blender_bridge` | `atelier_blender_bridge` | `run_blender`, прореживание ключей, скрипты `build_show.py`, `inspect_show.py`, `probe_skybrush.py` | domain |
-| `packages/jobs` | `atelier_jobs` | SQLite (SQLModel): `jobs`, индекс `shows`, `JobQueue` | show_engine |
-| `apps/worker` | `atelier_worker` | процесс, исполняющий задачи очереди | ядро, jobs |
-| `apps/api` | `atelier_api` | FastAPI: REST, SSE, бинарные кадры, статика UI | ядро, jobs |
+| `packages/jobs` | `atelier_jobs` | SQLite (SQLModel): `jobs`, индекс `shows`, `JobQueue`, чат (`ChatStore`) | show_engine |
+| `packages/assistant` | `atelier_assistant` | `LLMClient`, llama-server, инструменты, ход ассистента, системный промт | ядро, jobs |
+| `apps/worker` | `atelier_worker` | процесс, исполняющий задачи очереди и ходы чата | ядро, jobs, assistant |
+| `apps/api` | `atelier_api` | FastAPI: REST, SSE, бинарные кадры, статика UI | ядро, jobs, assistant |
 | `apps/cli` | `atelier_cli` | команда `atelier` (в т.ч. `atelier ui`) | всё ядро, jobs, worker, api |
 | `apps/web` | — | веб-UI (React, TypeScript), сборка в `apps/web/dist` | только HTTP API |
 | `plugins/*` | свои | реализации ролей | domain, plugin_sdk, blender_bridge |
@@ -202,14 +205,32 @@ settings = {}                     # ключи настроек с описан�
   опросом БД раз в 300 мс.
 - **UI** (ADR-029): список шоу; экран шоу — «Материалы» (бриф, флот, модели, музыка), рабочая
   область (3D: модель / точки с тепловой картой дистанций / проигрывание шоу; таймлайн с бюджетом,
-  музыкой и маркерами нарушений; pipeline с формами из схем; ревизии с diff и откатом; чат — фаза 3),
+  музыкой и маркерами нарушений; pipeline с формами из схем; ревизии с diff и откатом),
   «Студия» (этапы, статусы, stale с причиной, действия) и панель задач; экран «Плагины».
 - **Координаты во вьюере:** группа сцены повёрнута на −90° по X, show (x, y, z) → three (x, z, −y);
   зритель (−Y) стоит перед камерой.
+
+## Ассистент (фаза 3)
+- **Ход** (ADR-035): `POST /api/shows/{id}/chat` пишет сообщение и ставит задачу `assistant_turn`
+  (приоритет 10; 409, пока идёт предыдущий ход). Worker поднимает llama-server по требованию,
+  выключает его перед GPU-задачами и после простоя.
+- **Цикл** (`Agent.run_turn`): история (целыми ходами) + блок «шоу сейчас» (`show_summary`) →
+  ответ модели → инструменты → снова модель, до 8 шагов. Ошибки инструментов возвращаются модели;
+  три подряд — честная остановка. Каждый шаг пишется в `chat_events`, UI читает их через SSE
+  `GET …/chat/events?turn=&after=`.
+- **Инструменты** — методы `ShowService` с автором `assistant` (ADR-039). `propose_program` создаёт
+  карточки и сцены одной ревизией и подгоняет удержания (`program.fit_holds`) по оценке таймлайна
+  (`estimate.estimate_timeline`, ADR-038); `fit_to_budget` — то же для существующей программы.
+- **Предложения**: `propose_action` создаёт запись в `proposals`; кнопка «Применить»
+  (`POST …/proposals/{pid}/apply`) ставит задачу или вызывает сервис, «Отклонить» — `dismiss`.
+- **Откат ответа**: `POST …/chat/{turn}/rollback` — rollback к `revision_before` хода.
+- **UI**: колонка чата между «Материалами» и рабочей областью, ширина запоминается; текст стримится,
+  вызовы инструментов — свёрнутыми строками, предложения — карточками. Таймлайн берёт
+  `GET …/timeline` (оценка до компиляции, точные значения после).
 
 ## CLI
 `atelier new | list | use`, `fleet presets | use | set`, `music set`, `add-model [--glb]` (без `--glb`
 — пустая карточка под генерацию), `points`, `scene add | list`, `pipeline show | set | validators |
 exporters`, `status`, `compile`, `validate`, `export`, `history`, `rollback`, `doctor`,
-`plugin list | new | test`, `generate images | mesh`, `ui`, `worker`. Текущее шоу: `--show`,
+`plugin list | new | test`, `generate images | mesh`, `chat` (один ход ассистента), `ui`, `worker`. Текущее шоу: `--show`,
 `ATELIER_SHOW`, папка с `show.json` или последнее использованное (`.atelier/current_show`).
