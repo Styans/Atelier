@@ -59,6 +59,7 @@ def test_dropping_a_scene_never_frees_the_climb_to_the_first_one() -> None:
 
     # 8 + 43 + 5 x 10 + 6 x 6 + 50 = 187 s, 37 s over; a dropped scene frees 10 + 6 s, not 43
     assert fit.excess_s == pytest.approx(37) and fit.remove_scenes == 3
+    assert fit.shortest_s(4) == pytest.approx(187 - 2 * 16)  # what four scenes need at least
 
 
 def test_a_short_program_stays_short_at_the_maximum() -> None:

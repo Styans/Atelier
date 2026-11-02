@@ -49,11 +49,17 @@ class FitResult:
     excess_s: float = 0.0  # still over the budget with every hold at its minimum
     slack_s: float = 0.0  # still under the budget with every hold at its maximum
     remove_scenes: int = 0  # how many scenes to drop to fit, when there is an excess
+    drop_savings_s: list[float] = field(default_factory=list)  # freed per dropped scene, most first
     notes: list[str] = field(default_factory=list)
 
     @property
     def fits(self) -> bool:
         return self.excess_s == 0.0
+
+    def shortest_s(self, scenes: int) -> float:
+        """The shortest show with only ``scenes`` scenes left, holds at their minimum."""
+        dropped = max(0, len(self.holds) - scenes)
+        return self.budget_s + self.excess_s - sum(self.drop_savings_s[:dropped])
 
 
 def _scaled(desired: list[float], factor: float) -> list[float]:
@@ -103,6 +109,7 @@ def fit_holds(estimate: TimelineEstimate, desired: Mapping[str, float]) -> FitRe
             budget,
             excess_s=max(0.0, excess),
             remove_scenes=removed if excess > 0 else 0,
+            drop_savings_s=transitions,
         )
     if available >= n * MAX_HOLD_S:
         holds = [MAX_HOLD_S] * n

@@ -88,3 +88,24 @@ def test_generation_jobs(
     assert service.stale_report(store)["models.m_torus.mesh"] is None
     points = run(worker, queue, show_id, "points", model_id="m_torus")
     assert points["status"] == "done"
+
+
+def test_a_show_without_generators_gets_the_default_ones(
+    worker: Worker, queue: JobQueue, service: ShowService, fixture_files: dict[str, Path]
+) -> None:
+    store = small_show(service, fixture_files)
+    assert store.load().pipeline.image_generator is not None  # new shows have them already
+    old = store.load()
+    old.pipeline.image_generator = None  # a show made before that
+    store.commit(old, "Show from before default generators", "cli")
+    show_id = old.id
+
+    concepts = run(
+        worker, queue, show_id, "generate_images", model_id="m_torus", prompt="a ring", n=1
+    )
+
+    assert concepts["status"] == "done", concepts["error"]
+    pipeline = store.load().pipeline
+    assert pipeline.image_generator is not None
+    assert pipeline.image_generator.component == "fake.concepts"
+    assert "image_generator = fake.concepts (default)" in store.history()[-2].message

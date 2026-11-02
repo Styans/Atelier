@@ -27,6 +27,7 @@ from atelier_domain import (
     Brief,
     FlightSettings,
     ModelCard,
+    PipelineConfig,
     Scene,
     Show,
     StageConfig,
@@ -84,6 +85,8 @@ SINGLE_STAGE_ROLES: tuple[RoleName, ...] = (
     "image_generator",
     "mesh_generator",
 )
+# Optional in a pipeline (ADR-033); the first usable component is the default (ADR-041).
+GENERATOR_ROLES: tuple[RoleName, ...] = ("image_generator", "mesh_generator")
 
 
 BRIEF_FIELDS = frozenset(
@@ -269,7 +272,7 @@ class ShowService:
             id=new_show_id(title),
             seed=seed,
             brief=Brief(title=title, duration_s=duration_s, fleet=fleet, viewer_direction=viewer),
-            pipeline=self.config.pipeline.model_copy(deep=True),
+            pipeline=self._with_default_generators(self.config.pipeline.model_copy(deep=True)),
         )
         return ShowStore.create(self.config.projects_dir, show)
 
@@ -444,6 +447,36 @@ class ShowService:
 
     # --- generation (roles image_generator / mesh_generator) ---
 
+    def _default_generator(self, role: RoleName) -> StageConfig | None:
+        """The first usable component of a generation role, if any plugin offers one."""
+        components = sorted(self.registry.components(role), key=lambda info: info.id)
+        return StageConfig(component=components[0].id) if components else None
+
+    def _with_default_generators(self, pipeline: PipelineConfig) -> PipelineConfig:
+        for role in GENERATOR_ROLES:
+            if getattr(pipeline, role) is None:
+                setattr(pipeline, role, self._default_generator(role))
+        return pipeline
+
+    def _ensure_generator(self, store: ShowStore, model_id: str, role: RoleName) -> None:
+        """A show made before generation was set up gets the default generator, as a revision
+        of its own, so the pipeline always says what made an artifact."""
+        show = store.load()
+        if model_id not in show.models:
+            raise ServiceError(f"no model {model_id!r}")
+        if show.models[model_id].pipeline_overrides.get(role) or getattr(show.pipeline, role):
+            return
+        config = self._default_generator(role)
+        if config is None:
+            raise ServiceError(
+                f"no plugin offers {role}: enable one (Pygmalion) on the Plugins screen"
+            )
+
+        def change(show: Show) -> None:
+            setattr(show.pipeline, role, config)
+
+        self._edit(store, f"Pipeline: {role} = {config.component} (default)", change)
+
     def _generator_stage(self, show: Show, model_id: str, role: RoleName) -> StageConfig:
         card = show.models[model_id]
         config: StageConfig | None = card.pipeline_overrides.get(role) or getattr(
@@ -462,9 +495,8 @@ class ShowService:
         on_progress: Progress | None = None,
     ) -> ArtifactRecord:
         """Concept images for a model card; every set is kept, never overwritten."""
+        self._ensure_generator(store, model_id, "image_generator")
         show = store.load()
-        if model_id not in show.models:
-            raise ServiceError(f"no model {model_id!r}")
         card = show.models[model_id]
         prov = Provenance(show, self.registry)
         try:
@@ -534,9 +566,8 @@ class ShowService:
         on_progress: Progress | None = None,
     ) -> ArtifactRecord:
         """A 3D model from a concept image; it becomes the model's current mesh (ADR-027)."""
+        self._ensure_generator(store, model_id, "mesh_generator")
         show = store.load()
-        if model_id not in show.models:
-            raise ServiceError(f"no model {model_id!r}")
         card = show.models[model_id]
         concept = (
             concept
