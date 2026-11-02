@@ -96,7 +96,7 @@ export const ru = {
 
   "models.title": "Модели",
   "models.upload": "Загрузить модель (GLB/OBJ/STL)",
-  "models.empty": "Моделей нет — загрузите GLB.",
+  "models.empty": "Моделей нет — загрузите GLB или попросите ассистента придумать фигуры.",
   "models.height": "Высота фигуры, м (пусто = по дистанции)",
   "models.color": "Цвет",
   "models.color.texture": "из модели",
@@ -106,6 +106,12 @@ export const ru = {
   "models.points": "точки",
   "models.view": "Смотреть",
   "models.computePoints": "Рассчитать точки",
+  "models.concepts": "Концепты",
+  "models.moreConcepts": "Ещё концепты",
+  "models.mesh": "3D по концепту",
+  "models.remesh": "3D заново",
+  "models.pickConcept": "Выбрать этот концепт для 3D",
+  "models.prompt": "Промт концептов (по-английски)",
 
   "music.title": "Музыка",
   "music.upload": "Загрузить музыку",

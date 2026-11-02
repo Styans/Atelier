@@ -1,4 +1,5 @@
-import { Eye, Music, Pencil, Upload } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Box, Eye, Image as ImageIcon, Music, Pencil, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { api } from "@/api/client";
@@ -8,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Badge, Card, CardContent, CardHeader, CardTitle, Field, Input, Select, Textarea } from "@/components/ui/primitives";
 import { t } from "@/i18n/ru";
-import { formatSeconds } from "@/lib/utils";
+import { cn, formatSeconds } from "@/lib/utils";
 
 import { staleReason, useShowState } from "./context";
 
@@ -212,6 +213,7 @@ function ModelsCard() {
                 )}
                 {card.target_height_m && <Badge>{card.target_height_m} м</Badge>}
               </div>
+              <Generation card={card} />
             </div>
           );
         })}
@@ -221,12 +223,72 @@ function ModelsCard() {
   );
 }
 
+/** Concepts from the card's prompt, then a 3D model from the chosen one (GPU jobs, by click). */
+function Generation({ card }: { card: ModelCard }) {
+  const { id, view } = useShowState();
+  const runJob = useRunJob(id);
+  const concepts = useQuery({
+    queryKey: ["concepts", id, card.id, card.assets.concepts.length],
+    queryFn: () => api.get<string[]>(`/api/shows/${id}/models/${card.id}/concepts`),
+    enabled: card.assets.concepts.length > 0,
+  });
+  const [picked, setPicked] = useState<string | null>(null);
+  const chosen = picked ?? card.assets.selected_concept ?? concepts.data?.[0] ?? null;
+  const prompt = card.image_prompt || card.description || card.name;
+  const src = (concept: string) => {
+    const [artifact, file] = concept.split("/");
+    const record = view.show.artifacts[artifact];
+    return record ? `/api/shows/${id}/files/${record.path}/${file}` : undefined;
+  };
+  return (
+    <div className="mt-1 space-y-1">
+      <div className="flex flex-wrap gap-1">
+        <Button
+          size="sm"
+          variant="outline"
+          title={prompt}
+          disabled={runJob.isPending}
+          onClick={() => runJob.mutate({ kind: "generate_images", args: { model_id: card.id, prompt, n: 4 } })}
+        >
+          <ImageIcon className="h-3.5 w-3.5" /> {card.assets.concepts.length ? t("models.moreConcepts") : t("models.concepts")}
+        </Button>
+        {chosen && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={runJob.isPending}
+            onClick={() => runJob.mutate({ kind: "generate_mesh", args: { model_id: card.id, concept: chosen } })}
+          >
+            <Box className="h-3.5 w-3.5" /> {card.assets.mesh ? t("models.remesh") : t("models.mesh")}
+          </Button>
+        )}
+      </div>
+      {concepts.data && concepts.data.length > 0 && (
+        <div className="grid grid-cols-4 gap-1">
+          {concepts.data.slice(0, 8).map((concept) => (
+            <button
+              key={concept}
+              type="button"
+              title={t("models.pickConcept")}
+              onClick={() => setPicked(concept)}
+              className={cn("overflow-hidden rounded border", concept === chosen ? "ring-2 ring-primary" : "opacity-70 hover:opacity-100")}
+            >
+              <img src={src(concept)} alt="" className="aspect-square w-full object-cover" loading="lazy" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ModelDialog({ card, onClose }: { card: ModelCard; onClose: () => void }) {
   const { id } = useShowState();
   const [name, setName] = useState(card.name);
   const [height, setHeight] = useState(card.target_height_m?.toString() ?? "");
   const [color, setColor] = useState(card.color_source);
   const [palette, setPalette] = useState(card.palette.join(", "));
+  const [prompt, setPrompt] = useState(card.image_prompt ?? "");
   const save = useEdit(id, (changes: Record<string, unknown>, base) =>
     api.patch(`/api/shows/${id}/models/${card.id}`, { base_revision: base, changes }),
   );
@@ -250,6 +312,9 @@ function ModelDialog({ card, onClose }: { card: ModelCard; onClose: () => void }
           <Field label={t("brief.palette")}>
             <Input value={palette} onChange={(e) => setPalette(e.target.value)} />
           </Field>
+          <Field label={t("models.prompt")}>
+            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+          </Field>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={onClose}>
               {t("common.cancel")}
@@ -262,6 +327,7 @@ function ModelDialog({ card, onClose }: { card: ModelCard; onClose: () => void }
                     target_height_m: height.trim() ? Number(height.replace(",", ".")) : null,
                     color_source: color,
                     palette: palette.split(/[,\s]+/).filter(Boolean),
+                    image_prompt: prompt.trim() || null,
                   },
                   { onSuccess: onClose },
                 )
