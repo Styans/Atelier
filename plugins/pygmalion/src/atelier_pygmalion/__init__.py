@@ -120,9 +120,35 @@ def _release(keep_loaded: bool) -> None:
         _manager.unload_all()
 
 
+def _backends(kind: str, fallback: tuple[str, ...]) -> tuple[str, ...]:
+    """Pygmalion's own backends of a kind (``txt2img``, ``img2mesh``), read when the plugin
+    loads: a backend added to Pygmalion shows up here without a change to this plugin."""
+    try:
+        from dronegen_server.backends import Registry
+        from dronegen_server.config import Settings
+
+        found = tuple(
+            backend.name
+            for backend in Registry(Settings.load(_home())).all()
+            if backend.kind == kind and backend.name not in ("parametric", "template")
+        )
+    except Exception:  # no Pygmalion here (contract tests, docs): the last known list
+        return fallback
+    return found or fallback
+
+
+IMAGE_BACKENDS = _backends("txt2img", ("zimage_turbo", "sdxl", "mock"))
+MESH_BACKENDS = _backends("img2mesh", ("hunyuan", "hunyuan_mv", "triposr", "silhouette", "mock"))
+
+
+def _default(names: tuple[str, ...], preferred: str) -> str:
+    return preferred if preferred in names else names[0]
+
+
 class ImagesParams(BaseModel):
-    backend: Literal["zimage_turbo", "sdxl", "mock"] = Field(
-        "zimage_turbo", description="zimage_turbo ignores the negative prompt"
+    backend: Literal[IMAGE_BACKENDS] = Field(  # type: ignore[valid-type]
+        _default(IMAGE_BACKENDS, "zimage_turbo"),
+        description="Pygmalion's image models; zimage_turbo ignores the negative prompt",
     )
     width: int = Field(768, ge=256, le=2048)
     height: int = Field(768, ge=256, le=2048)
@@ -164,8 +190,12 @@ class Images(ImageGenerator[ImagesParams]):
 
 
 class MeshParams(BaseModel):
-    backend: Literal["hunyuan", "triposr", "silhouette", "mock"] = Field(
-        "hunyuan", description="hunyuan: Hunyuan3D-2mini; silhouette runs on the CPU"
+    backend: Literal[MESH_BACKENDS] = Field(  # type: ignore[valid-type]
+        _default(MESH_BACKENDS, "hunyuan"),
+        description=(
+            "hunyuan: Hunyuan3D-2mini from one picture; hunyuan_mv: from a sheet of four views"
+            " (more precise shape); silhouette runs on the CPU"
+        ),
     )
     remove_bg: bool = True
     mc_resolution: int | None = Field(None, ge=32, le=512, description="None = the model's default")

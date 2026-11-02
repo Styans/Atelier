@@ -213,6 +213,22 @@ def test_cache_lists_subprocess_plugins_without_starting_them(
         assert runner.started
 
 
+def test_an_edited_plugin_is_described_again(tmp_path: Path) -> None:
+    plugin_id = uid()
+    root = write_plugin(tmp_path / "plugins", plugin_id, runtime="subprocess")
+    cache = tmp_path / "cache.json"
+    discover(tmp_path / "plugins", cache_path=cache).close()
+    module = root / "src" / plugin_id / "__init__.py"
+    module.write_text(
+        module.read_text(encoding="utf-8").replace('name = "random"', 'name = "shuffled"'),
+        encoding="utf-8",
+    )
+    os.utime(module, ns=(module.stat().st_atime_ns, module.stat().st_mtime_ns + 10**9))
+
+    with discover(tmp_path / "plugins", cache_path=cache) as registry:
+        assert [c.name for c in registry.components("point_distributor")] == ["shuffled"]
+
+
 def test_native_import_in_a_call_does_not_wait_for_stdin(tmp_path: Path, mesh_ref: MeshRef) -> None:
     # Started from the cache, the plugin's first scipy import happens in the call thread. scipy's
     # BLAS DLL queries the standard input while loading; on Windows that waited for the server's

@@ -360,8 +360,7 @@ def _load(
         else:
             runner = SubprocessRunner(manifest, plugin.root, log_path=log_path, settings=settings)
             plugin.runner = runner
-            key = f"{manifest.id}@{manifest.version}"
-            described = cache.get(key) or runner.describe()
+            described = cache.get(_cache_key(plugin)) or runner.describe()
         plugin.components = _component_infos(manifest, described)
         # A subprocess plugin listed from the cache is not started just for a health check.
         if isinstance(plugin.runner, InProcessRunner) or _started(plugin.runner):
@@ -425,6 +424,17 @@ def _component_infos(
     return infos
 
 
+def _cache_key(plugin: LoadedPlugin) -> str:
+    """Version plus the newest change to the plugin's own files: an edited plugin is described
+    again without a version bump. What it reads elsewhere (Pygmalion's backends) is picked up
+    after ``atelier update`` drops the cache."""
+    newest = max(
+        (p.stat().st_mtime_ns for p in plugin.root.rglob("*") if p.suffix in (".py", ".toml")),
+        default=0,
+    )
+    return f"{plugin.manifest.id}@{plugin.manifest.version}:{newest}"
+
+
 def _read_cache(path: Path | None) -> dict[str, Any]:
     if path is None or not path.is_file():
         return {}
@@ -439,8 +449,7 @@ def _write_cache(path: Path, plugins: Sequence[LoadedPlugin]) -> None:
     cache = _read_cache(path)
     for plugin in plugins:
         if plugin.manifest.runtime == "subprocess" and plugin.components:
-            key = f"{plugin.manifest.id}@{plugin.manifest.version}"
-            cache[key] = [
+            cache[_cache_key(plugin)] = [
                 {
                     "role": i.role,
                     "name": i.name,
