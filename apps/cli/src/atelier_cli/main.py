@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -732,6 +734,90 @@ def doctor() -> None:
             except subprocess.TimeoutExpired:
                 console.print("[red]blender:[/red] did not answer within 120 s")
         _plugin_table(svc.registry.plugins)
+
+
+# --- update --------------------------------------------------------------------------------
+
+
+def _git_pins(lock: Path) -> dict[str, tuple[str, str, str]]:
+    """Packages uv takes from git: name -> (repository url, branch, pinned commit)."""
+    pins = {}
+    for package in tomllib.loads(lock.read_text(encoding="utf-8")).get("package", []):
+        source = package.get("source", {}).get("git")
+        if source:
+            url, _, commit = source.partition("#")
+            url, _, query = url.partition("?")
+            branch = dict(p.split("=", 1) for p in query.split("&") if "=" in p).get("branch", "")
+            pins[package["name"]] = (url, branch, commit)
+    return pins
+
+
+def _git(*args: str) -> str:
+    run = subprocess.run(["git", *args], capture_output=True, text=True, timeout=120, check=False)
+    return run.stdout.strip() if run.returncode == 0 else ""
+
+
+def _checkout_state(folder: Path) -> str:
+    """How a local checkout a plugin runs from compares with its remote branch."""
+    top = _git("-C", str(folder), "rev-parse", "--show-toplevel")
+    if not top:
+        return "not a git checkout"
+    _git("-C", top, "fetch", "--quiet")
+    behind = _git("-C", top, "rev-list", "--count", "HEAD..@{u}")
+    changed = len(_git("-C", top, "status", "--porcelain").splitlines())
+    state = f"{_git('-C', top, 'rev-parse', '--short', 'HEAD')}"
+    state += (
+        f", {behind} commit(s) behind its remote" if behind not in ("", "0") else ", up to date"
+    )
+    if changed:
+        state += f", {changed} uncommitted file(s)"
+    if behind not in ("", "0"):
+        state += f" — to take them: git -C {top} pull"
+    return state
+
+
+@app.command()
+def update(
+    check: Annotated[bool, typer.Option("--check", help="Only report what is newer")] = False,
+) -> None:
+    """Take the newest commits of plugins pinned to git (Pointille) and report the plugins that
+    run from a local checkout (Pygmalion). Restart `atelier ui` afterwards."""
+    config = load_config()
+    lock = config.root / "uv.lock"
+    if not lock.is_file():
+        console.print(f"[red]error:[/red] no uv.lock in {config.root}; run this in the repository")
+        raise typer.Exit(1)
+    before = _git_pins(lock)
+    if not check and before:
+        uv = os.environ.get("UV") or shutil.which("uv") or "uv"
+        upgrade = [a for name in before for a in ("--upgrade-package", name)]
+        for command in ([uv, "lock", *upgrade], [uv, "sync"]):
+            if subprocess.run(command, cwd=config.root, check=False).returncode != 0:
+                console.print(f"[red]error:[/red] {' '.join(command)} failed")
+                raise typer.Exit(1)
+    after = _git_pins(lock)
+    for name, (url, branch, commit) in sorted(after.items()):
+        old = before[name][2]
+        if check:
+            remote = _git("ls-remote", url, f"refs/heads/{branch or 'HEAD'}").split("\t")[0]
+            news = "up to date" if remote[:10] == commit[:10] else f"newer: {remote[:10]}"
+            console.print(f"{name}: {commit[:10]} ({url} {branch}), {news}")
+        else:
+            moved = "unchanged" if old == commit else f"{old[:10]} -> {commit[:10]}"
+            console.print(f"{name}: {moved} ({url} {branch})")
+    folders = {
+        plugin: Path(value)
+        for plugin, settings in config.plugin_settings.items()
+        for value in settings.values()
+        if Path(value).is_dir()
+    }
+    for plugin, folder in sorted(folders.items()):
+        console.print(f"{plugin} (local checkout): {_checkout_state(folder)}")
+    if not check:
+        # Subprocess plugins are listed from this cache; what they read from their own
+        # checkout (Pygmalion's backends) is described again on the next start.
+        (config.cache_dir / "plugins.json").unlink(missing_ok=True)
+        console.print("plugin descriptions will be refreshed: restart `atelier ui` if it runs")
 
 
 # --- plugins -------------------------------------------------------------------------------

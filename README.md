@@ -35,8 +35,8 @@
 - Для генерации фигур и ассистента — установленный
   [Pygmalion](https://github.com/Styans/Pygmalion) (его venv, модели и llama-server) и видеокарта
   NVIDIA.
-- Плагин раскладки точек берёт [Pointille](https://github.com/Styans/Pointille), ветку
-  `atelier-integration`. Путь к его локальной копии задан в `plugins/pointille/pyproject.toml`.
+- Плагин раскладки точек берёт [Pointille](https://github.com/Styans/Pointille) с GitHub, ветку
+  `main`; коммит закреплён в `uv.lock`.
 
 ## Установка
 
@@ -72,6 +72,9 @@ uv run atelier compile
 uv run atelier validate
 uv run atelier export
 ```
+
+Свежие версии плагинов: `uv run atelier update` переносит Pointille на последний коммит `main`
+и проверяет, не отстаёт ли рабочая копия Pygmalion от GitHub (`--check` — только проверить).
 
 Другие команды — `uv run atelier --help`: `status`, `history`, `rollback`, `fleet`, `music`,
 `pipeline`, `generate`, `chat`, `plugin`.
