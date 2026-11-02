@@ -245,6 +245,23 @@ def test_facts_the_user_never_gave_stay_out_of_the_brief(turn: Turn) -> None:
     assert "пользователь этого не говорил: date, duration_s, location" in result
 
 
+def test_an_invented_duration_is_not_fitted(turn: Turn) -> None:
+    turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
+
+    _, llm = turn.run("применить", [calls(("fit_to_budget", {"duration_s": 250})), answer("ok")])
+
+    error = llm.requests[1].messages[-1]["content"][0]
+    assert error["is_error"] and "не называл длительность" in error["content"]
+    assert turn.store.load().brief.duration_s == 600
+
+
+def test_a_promised_button_that_is_not_there_is_explained(turn: Turn) -> None:
+    turn.run("сделай 3D", [answer("Нажмите «Применить» в Студии.")])
+
+    last = turn.chat.history(turn.store.load().id)[-1]
+    assert last.role == "notice" and "Кнопки «Применить» здесь нет" in last.blocks()[0]["text"]
+
+
 def test_a_budget_too_short_for_any_program_asks_for_more_time(turn: Turn) -> None:
     turn.service.update_brief(turn.store, {"duration_s": 75})
 

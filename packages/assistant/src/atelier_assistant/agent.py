@@ -37,6 +37,11 @@ MAX_STEPS = 8
 MAX_FAILURES = 2
 HISTORY_CHARS = 24_000  # ~8K tokens of the 16K context; older turns are left out
 TEXT_FLUSH_S = 0.15
+NO_BUTTON_NOTICE = (
+    "Кнопки «Применить» здесь нет: ассистент ничего не предложил. Концепты и 3D для фигуры"
+    " запускаются кнопками «Концепты» и «3D по концепту» на карточке модели в «Материалах»;"
+    " правки шоу можно попросить словами, например «поставь длительность 6 минут»."
+)
 
 Emit = Callable[[str, dict[str, Any]], None]
 
@@ -182,6 +187,7 @@ class Agent:
         messages = to_messages(history)
         if not messages or messages[-1]["role"] != "user":
             raise LLMError("нет сообщения пользователя для ответа")
+        asked = len(messages)  # what follows is this turn's
         since = _previous_end(history, turn_job_id)
         edits = _user_edits(store, since)
         request_text = " ".join(b["text"] for b in messages[-1]["content"] if b["type"] == "text")
@@ -275,6 +281,23 @@ class Agent:
                     turn_job_id=turn_job_id,
                     revision_before=before,
                 )
+        answer = " ".join(
+            b["text"]
+            for m in messages[asked:]
+            if m["role"] == "assistant"
+            for b in m["content"]
+            if b["type"] == "text"
+        )
+        if "применить" in answer.casefold() and not self.chat.proposals(show_id, status="pending"):
+            # The small model talks about an "Apply" button without proposing anything; the
+            # user then typed «Применить» into the chat and nothing happened, again and again.
+            last_saved = self.chat.append(
+                show_id,
+                "notice",
+                [text_block(NO_BUTTON_NOTICE)],
+                turn_job_id=turn_job_id,
+                revision_before=before,
+            )
         if result.stopped:
             notice = self.chat.append(
                 show_id,

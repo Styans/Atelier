@@ -377,6 +377,11 @@ def update_model_card(ctx: ToolContext, args: CardChange) -> str:
 def fit_to_budget(ctx: ToolContext, args: FitArgs) -> str:
     # The duration rides along: a small model asked to "shorten to 3 minutes" tends to fit
     # the old budget and forget update_brief.
+    if args.duration_s is not None and ctx.said and _unsaid(ctx.said, {"duration_s": 1}):
+        raise ToolFailure(
+            "пользователь не называл длительность: не меняйте её. Подгоните под текущую"
+            " (fit_to_budget без duration_s) или спросите, сколько должно длиться шоу"
+        )
     if args.duration_s is not None:
         ctx.service.update_brief(ctx.store, {"duration_s": args.duration_s})
     show, fit = ctx.service.fit_program(ctx.store)
