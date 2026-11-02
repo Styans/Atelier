@@ -375,7 +375,7 @@ dependencies = [
 requires-dist = [
     { name = "atelier-plugin-sdk", editable = "packages/plugin_sdk" },
     { name = "numpy", specifier = ">=2.1" },
-    { name = "pointille", git = "file:///C:/Users/Beacon/Repo/Pointille?branch=atelier-integration" },
+    { name = "pointille", git = "https://github.com/Styans/Pointille?branch=main" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "scipy", specifier = ">=1.14" },
 ]
@@ -1045,7 +1045,7 @@ wheels = [
 [[package]]
 name = "pointille"
 version = "0.1.0"
-source = { git = "file:///C:/Users/Beacon/Repo/Pointille?branch=atelier-integration#468fa98205b218de45232fe7d9c93df7a0d71bde" }
+source = { git = "https://github.com/Styans/Pointille?branch=main#ba5ead93dad5084025b40491f815ccf8e955ad40" }
 dependencies = [
     { name = "numpy" },
 ]

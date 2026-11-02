@@ -100,6 +100,15 @@ class BlueNoiseParams(BaseModel):
     facade_angle: float = Field(80.0, gt=0.0, le=90.0)
     audience_spread: float = Field(0.0, ge=0.0, le=180.0)
     hidden_density: float = Field(0.0, ge=0.0, le=1.0)
+    occlusion: bool = Field(True, description="Facade: parts of the model hide what is behind")
+    outline: bool = Field(
+        False, description="Some drones right on the lines that draw the model, denser than fill"
+    )
+    outline_amount: Literal["density", "share"] = Field(
+        "density", description="density: lines outline_density times denser; share: that share"
+    )
+    outline_density: float = Field(1.5, ge=1.0, le=5.0)
+    outline_share: float = Field(0.3, gt=0.0, lt=1.0)
 
 
 class BlueNoise(PointDistributor[BlueNoiseParams]):
@@ -125,6 +134,11 @@ class BlueNoise(PointDistributor[BlueNoiseParams]):
             facade_angle=params.facade_angle,
             audience_spread=params.audience_spread,
             hidden_density=params.hidden_density,
+            occlusion=params.occlusion,
+            outline=params.outline,
+            outline_amount=params.outline_amount,
+            outline_density=params.outline_density,
+            outline_share=params.outline_share,
             color_mode=params.color_mode,
             min_brightness=params.min_brightness,
             up_axis=2,

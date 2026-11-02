@@ -12,8 +12,9 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-# Pinned through uv.lock to a commit of the atelier-integration branch (ADR-013).
-pointille = { git = "file:///C:/Users/Beacon/Repo/Pointille", branch = "atelier-integration" }
+# The author's main branch on GitHub, pinned by uv.lock; `atelier update` moves the pin to the
+# newest commit (ADR-041, replaces the local atelier-integration branch of ADR-013).
+pointille = { git = "https://github.com/Styans/Pointille", branch = "main" }
 
 [build-system]
 requires = ["uv_build>=0.13.4,<0.14"]

@@ -15,7 +15,7 @@ def distribute(tmp_path: Path, mesh: MeshData, n: int, seed: int = 0, **params: 
     return BlueNoise().distribute(ctx, ref, n, BlueNoiseParams(**params)).load()  # type: ignore[arg-type]
 
 
-def test_pointille_comes_from_the_integration_commit() -> None:
+def test_pointille_comes_from_a_pinned_commit() -> None:
     revision = pointille_revision()
 
     assert "@" in revision  # version @ git commit
@@ -29,6 +29,16 @@ def test_exactly_n_points_on_the_surface(tmp_path: Path, n: int) -> None:
     points = distribute(tmp_path, mesh, n)
 
     assert len(points) == n
+    on_surface = np.einsum("nk,nkd->nd", points.barycentric, mesh.triangles()[points.tri_index])
+    assert np.allclose(on_surface, points.positions, atol=1e-9)
+
+
+def test_outline_keeps_the_count(tmp_path: Path) -> None:
+    mesh = reference_mesh(subdivisions=3)
+
+    points = distribute(tmp_path, mesh, 120, outline=True, outline_amount="share")
+
+    assert len(points) == 120
     on_surface = np.einsum("nk,nkd->nd", points.barycentric, mesh.triangles()[points.tri_index])
     assert np.allclose(on_surface, points.positions, atol=1e-9)
 
