@@ -127,9 +127,9 @@ def test_three_failures_in_a_row_stop_the_turn_honestly(turn: Turn) -> None:
 
 
 def test_a_program_too_long_is_replaced_by_the_model_itself(turn: Turn) -> None:
-    turn.service.update_brief(turn.store, {"duration_s": 120})
+    turn.service.update_brief(turn.store, {"duration_s": 240})
     result, llm = turn.run(
-        "программа на 2 минуты",
+        "программа на 4 минуты",
         [
             calls(("propose_program", program(12))),
             calls(("propose_program", program(6, hold=8))),
@@ -225,6 +225,44 @@ def test_the_code_says_when_a_turn_left_the_show_over_budget(turn: Turn) -> None
 
     last = turn.chat.history(turn.store.load().id)[-1]
     assert last.role == "notice" and "при бюджете 2:00: не укладывается" in last.blocks()[0]["text"]
+
+
+def test_facts_the_user_never_gave_stay_out_of_the_brief(turn: Turn) -> None:
+    invented = {
+        "occasion": "Новый год",
+        "date": "2025-01-29",
+        "location": "Москва, Центральный парк",
+        "duration_s": 75,
+    }
+    _, llm = turn.run(
+        "шоу дронов на новый год обезьяны", [calls(("update_brief", invented)), answer("ok")]
+    )
+
+    brief = turn.store.load().brief
+    assert brief.occasion == "Новый год"
+    assert brief.date is None and brief.location is None and brief.duration_s == 600
+    result = llm.requests[1].messages[-1]["content"][0]["content"]
+    assert "пользователь этого не говорил: date, duration_s, location" in result
+
+
+def test_a_budget_too_short_for_any_program_asks_for_more_time(turn: Turn) -> None:
+    turn.service.update_brief(turn.store, {"duration_s": 75})
+
+    _, llm = turn.run("программа", [calls(("propose_program", program(6))), answer("ok")])
+
+    result = llm.requests[1].messages[-1]["content"][0]["content"]
+    assert "Программу больше не меняйте" in result and "нужно не меньше" in result
+
+
+def test_a_mesh_is_proposed_only_after_concepts(turn: Turn) -> None:
+    turn.run("сделай программу", [calls(("propose_program", program(6))), answer("ok")])
+    model_id = turn.store.load().program[0].model_id
+    mesh = {"action": "generate_mesh", "target_id": model_id, "reason": "3D для первой сцены"}
+
+    _, llm = turn.run("сделай 3D", [calls(("propose_action", mesh)), answer("ok")])
+
+    error = llm.requests[1].messages[-1]["content"][0]
+    assert error["is_error"] and "сначала предложите generate_images" in error["content"]
 
 
 def test_expensive_actions_are_proposals(turn: Turn) -> None:

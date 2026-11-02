@@ -41,6 +41,7 @@ JOB_ACTIONS: dict[str, Callable[[dict[str, Any]], tuple[str, dict[str, Any]]]] =
         "generate_images",
         {"model_id": a.get("target_id"), "prompt": a.get("prompt"), "n": 4},
     ),
+    "generate_mesh": lambda a: ("generate_mesh", {"model_id": a.get("target_id")}),
 }
 
 

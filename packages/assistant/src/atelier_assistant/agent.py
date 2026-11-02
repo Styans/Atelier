@@ -185,12 +185,20 @@ class Agent:
         since = _previous_end(history, turn_job_id)
         edits = _user_edits(store, since)
         request_text = " ".join(b["text"] for b in messages[-1]["content"] if b["type"] == "text")
+        said = " ".join(
+            b["text"]
+            for m in history
+            if m.role == "user" and m.rolled_back_at is None
+            for b in m.blocks()
+            if b["type"] == "text"
+        )
         ctx = ToolContext(
             self.service,
             store,
             self.chat,
             show_id,
             request=request_text,
+            said=said,
             hand_changed=_hand_changed(store, since),
         )
 

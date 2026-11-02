@@ -72,6 +72,7 @@ export const ru = {
   "chat.action.validate": "проверить",
   "chat.action.export": "экспорт",
   "chat.action.generate_images": "сгенерировать концепты",
+  "chat.action.generate_mesh": "сделать 3D-модель по концепту",
   "chat.action.remove_scene": "удалить сцену",
   "chat.action.remove_model": "удалить карточку",
   "chat.action.replace_program": "заменить программу",

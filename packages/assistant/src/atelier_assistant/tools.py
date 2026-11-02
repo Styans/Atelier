@@ -11,6 +11,8 @@ every request.
 from __future__ import annotations
 
 import datetime as dt
+import math
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -111,7 +113,14 @@ class FitArgs(Args):
 
 
 Action = Literal[
-    "points", "compile", "validate", "export", "generate_images", "remove_scene", "remove_model"
+    "points",
+    "compile",
+    "validate",
+    "export",
+    "generate_images",
+    "generate_mesh",
+    "remove_scene",
+    "remove_model",
 ]
 
 
@@ -134,6 +143,7 @@ class ToolContext:
     created_cards: set[str] = field(default_factory=set)
     proposals: list[str] = field(default_factory=list)
     request: str = ""  # the user's message this turn answers
+    said: str = ""  # everything the user wrote in this chat, for facts the model may not invent
     # Fields people changed by hand since the previous answer: id → field → value now.
     hand_changed: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -169,6 +179,11 @@ def _figure(args: FigureArgs | None) -> FigureDraft | None:
     )
 
 
+def _minutes(seconds: float) -> str:
+    whole = math.ceil(seconds / 30) * 30  # up to the next half minute
+    return f"{whole // 60}:{whole % 60:02d}"
+
+
 REMOVE_BY_PROGRAM = "вызовите propose_program снова, на {n} сцен(ы) меньше"
 REMOVE_BY_PROPOSAL = (
     "предложите пользователю убрать {n} сцен(ы): propose_action с action=remove_scene и"
@@ -178,6 +193,16 @@ REMOVE_BY_PROPOSAL = (
 
 def _fit_text(fit: FitResult, remove_how: str = REMOVE_BY_PROGRAM) -> str:
     total = f"оценка шоу {fit.total_s:.0f} с из {fit.budget_s:.0f} с"
+    if not fit.fits and len(fit.holds) - fit.remove_scenes < MIN_PROGRAM:
+        # Fewer scenes than a program may have: re-proposing cannot help, and a small model
+        # otherwise rewrites the same program until it runs out of steps.
+        least = fit.shortest_s(MIN_PROGRAM)
+        return (
+            f"{total}: не помещается — даже {MIN_PROGRAM} сцен при минимальных удержаниях займут"
+            f" около {least:.0f} с (подъём к первой фигуре, переходы, возврат и посадка флота)."
+            " Программу больше не меняйте. Ответьте пользователю: длительность слишком мала для"
+            f" этого флота, нужно не меньше {_minutes(least)}; спросите, увеличить ли её"
+        )
     if not fit.fits:
         return (
             f"{total}: не помещается даже при минимальных удержаниях (лишних"
@@ -189,20 +214,50 @@ def _fit_text(fit: FitResult, remove_how: str = REMOVE_BY_PROGRAM) -> str:
     return f"{total}{slack}. Удержания: {holds}"
 
 
+MONTHS = r"январ|феврал|март|апрел|\bма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр"
+
+
+def _unsaid(said: str, changes: dict[str, Any]) -> list[str]:
+    """Brief facts the user never gave anywhere in the chat: the model is not to make them up
+    (it wrote a date, a city and 75 seconds for "a show for the year of the monkey")."""
+    said = said.casefold()
+    numbers = bool(re.search(r"\d", said))
+    checks: dict[str, Callable[[Any], bool]] = {
+        "date": lambda _: numbers or bool(re.search(MONTHS, said)),
+        "duration_s": lambda _: numbers or bool(re.search(r"минут|секунд|час", said)),
+        "drone_count": lambda _: numbers,
+        "location": lambda value: any(
+            word[:4] in said for word in re.findall(r"\w{4,}", str(value).casefold())
+        ),
+    }
+    return [name for name, ok in checks.items() if changes.get(name) and not ok(changes[name])]
+
+
 def update_brief(ctx: ToolContext, args: BriefArgs) -> str:
     changes = args.model_dump(exclude_none=True)
+    unsaid = _unsaid(ctx.said, changes) if ctx.said else []
+    for name in unsaid:
+        del changes[name]
     side = changes.pop("audience_side", None)
     if side is not None:
         changes["viewer_direction"] = AUDIENCE_SIDES[side]
     drones = changes.pop("drone_count", None)
     if drones is not None:
         ctx.service.set_fleet(ctx.store, drone_count=drones)
+    skipped = (
+        f"; не записано, пользователь этого не говорил: {', '.join(unsaid)} — оставьте пустым"
+        " и спросите в конце ответа"
+        if unsaid
+        else ""
+    )
     if changes:
         ctx.service.update_brief(ctx.store, changes)
     if not changes and drones is None:
+        if unsaid:
+            return f"бриф не изменён{skipped}"
         raise ToolFailure("ничего не передано: укажите хотя бы одно поле брифа")
     done = sorted([*changes, *(["drone_count"] if drones is not None else [])])
-    return f"бриф обновлён: {', '.join(done)}"
+    return f"бриф обновлён: {', '.join(done)}{skipped}"
 
 
 def propose_program(ctx: ToolContext, args: ProgramArgs) -> str:
@@ -333,12 +388,16 @@ def propose_action(ctx: ToolContext, args: ActionArgs) -> str:
     show = ctx.store.load()
     if args.action in ("remove_scene",) and args.target_id not in {s.id for s in show.program}:
         raise ToolFailure(f"нет сцены {args.target_id!r}")
-    if args.action in ("remove_model", "points", "generate_images") and (
+    if args.action in ("remove_model", "points", "generate_images", "generate_mesh") and (
         args.target_id not in show.models
     ):
         raise ToolFailure(f"нет модели {args.target_id!r}; для этого действия нужен её id")
     if args.action == "generate_images" and not args.prompt:
         raise ToolFailure("для generate_images нужен prompt (по-английски)")
+    if args.action == "generate_mesh" and not show.models[str(args.target_id)].assets.concepts:
+        raise ToolFailure(
+            f"у {args.target_id} ещё нет концептов: сначала предложите generate_images"
+        )
     return _propose(
         ctx, args.action, {"target_id": args.target_id, "prompt": args.prompt}, args.reason
     )
